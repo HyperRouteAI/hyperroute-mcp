@@ -83,10 +83,11 @@ async def test_recommend_declares_the_native_baseline(fake):
     assert ctx["native_tools"] == ["claude_code_opus_deep", "claude_code_sonnet_quick"]
 
 
-async def test_recommend_lets_a_caller_supplied_context_win(fake):
+async def test_recommend_keeps_the_declaration_under_a_caller_context(fake):
     await server.recommend("q", context={"native_tools": [], "usage": {"monthly_queries": 5}})
     ctx = fake.last("recommend_text")["context"]
-    assert ctx["native_tools"] == [] and ctx["usage"] == {"monthly_queries": 5}
+    assert ctx["native_tools"] == ["claude_code_opus_deep", "claude_code_sonnet_quick"]
+    assert ctx["usage"] == {"monthly_queries": 5}
 
 
 async def test_recommend_passes_facets_through_and_omits_unset_knobs(fake):

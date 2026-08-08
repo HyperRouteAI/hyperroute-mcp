@@ -52,6 +52,12 @@ Requires Python ≥ 3.10.
 claude mcp add hyperroute -- hyperroute-mcp
 ```
 
+**OpenCode** — copy [`opencode.json`](opencode.json) into your project. OpenCode is bring-your-own-model,
+so the server can't infer what you're running from the client name alone: set `HYPERROUTE_COORDINATOR`
+(or `HYPERROUTE_NATIVE_TOOLS`) to match the model you actually point it at, or HyperRoute will have no
+baseline for you. [`AGENTS.md`](AGENTS.md) carries the operating loop and the methodology — drop it in
+so the agent can both act correctly and explain how the routing works.
+
 **Any MCP client** (`mcp.json` / `claude_desktop_config.json` / equivalent):
 
 ```json
