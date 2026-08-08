@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "hyperroute": {
+      "type": "local",
+      "command": ["hyperroute-mcp"],
+      "environment": {
+        "HYPERROUTE_BASE_URL": "https://hyperroute.io"
+      },
+      "enabled": true
+    }
+  }
+}

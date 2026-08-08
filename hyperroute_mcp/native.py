@@ -132,11 +132,30 @@ async def declared_context(client, client_name: str | None) -> dict:
 
 
 def merge_context(declared: dict, supplied: dict | None) -> dict | None:
-    """Merge the declaration under a caller-supplied `context` — an explicit value always wins,
-    including an explicit empty one, so a coordinator can override what we detected."""
-    if not declared:
-        return supplied
-    merged = dict(declared)
-    for k, v in (supplied or {}).items():
-        merged[k] = v
-    return merged
+    """Merge the declaration UNDER a caller-supplied `context`.
+
+    `native_tools` and `entitlements.held` are **unioned, never dropped** — what the caller is, and
+    what it holds, are structural facts, so a per-call context adds to them rather than replacing
+    them. (Silently losing the declaration on a call that happened to pass a context is the exact
+    failure this whole module exists to prevent.) Every other key the caller passes wins outright.
+    To route with no baseline at all, disable the declaration itself: `HYPERROUTE_COORDINATOR=none`.
+    """
+    caller = dict(supplied or {})
+    if not declared and not caller:
+        return None
+
+    merged = {**caller}
+    native = _union(declared.get("native_tools"), caller.get("native_tools"))
+    if native:
+        merged["native_tools"] = native
+
+    caller_ent = dict(caller.get("entitlements") or {})
+    held = _union((declared.get("entitlements") or {}).get("held"), caller_ent.get("held"))
+    if held or caller_ent:
+        merged["entitlements"] = {**caller_ent, **({"held": held} if held else {})}
+    return merged or None
+
+
+def _union(*lists) -> list[str]:
+    """Order-preserving union — declaration first, caller's additions after."""
+    return list(dict.fromkeys([x for lst in lists for x in (lst or [])]))
