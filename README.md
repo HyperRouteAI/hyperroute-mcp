@@ -29,11 +29,7 @@ and what it will cost.
 
 ## Install
 
-```bash
-pip install hyperroute-mcp
-```
-
-Or from source:
+Not on PyPI yet — install from source:
 
 ```bash
 git clone https://github.com/HyperRouteAI/hyperroute-mcp
@@ -42,7 +38,13 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
-Requires Python ≥ 3.10.
+Or straight from GitHub, without cloning:
+
+```bash
+pip install git+https://github.com/HyperRouteAI/hyperroute-mcp
+```
+
+Either way you get the `hyperroute-mcp` command on your PATH. Requires Python ≥ 3.10.
 
 ## Add it to your coordinator
 
@@ -51,6 +53,11 @@ Requires Python ≥ 3.10.
 ```bash
 claude mcp add hyperroute -- hyperroute-mcp
 ```
+
+If you installed into a venv, `hyperroute-mcp` is only on your PATH while that venv is active — MCP
+clients launch the server themselves, outside your shell. Give them the absolute path instead
+(`/path/to/.venv/bin/hyperroute-mcp`), or install with [`pipx`](https://pipx.pypa.io) so the command
+is always available.
 
 **OpenCode** — copy [`opencode.json`](opencode.json) into your project. OpenCode is bring-your-own-model,
 so the server can't infer what you're running from the client name alone: set `HYPERROUTE_COORDINATOR`
