@@ -1,0 +1,3 @@
+# HyperRoute MCP — runtime deps (kept in sync with pyproject.toml).
+mcp>=1.2.0        # Model Context Protocol Python SDK (FastMCP)
+httpx>=0.27       # async HTTP client for the router surface

@@ -1,0 +1,18 @@
+# build / install artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# local editor / tooling state
+.idea/
+.vscode/
+.ruff_cache/
+.pytest_cache/
+
+# machine-local MCP client wiring (absolute paths — never committed)
+.mcp.json
+.env
