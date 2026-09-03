@@ -724,6 +724,22 @@ async def my_tool_report() -> dict:
 
 
 # -- HyperFeed ---------------------------------------------------------------
+def _feed_unavailable(res):
+    """A router that does not serve HyperFeed answers its feed paths with a bare 404, and a bare
+    404 reads to a model as "wrong argument" — so it retries with different parameters before
+    giving up (observed: two wasted calls, then a guess). HyperFeed is a separate service and a
+    self-hosted or local router legitimately does not carry it, so say THAT once and say it
+    plainly: not-deployed-here is a different fact from a bad request, and only one of them is
+    worth a second attempt."""
+    if isinstance(res, dict) and res.get("_http_status") == 404:
+        return {"_error": True, "_http_status": 404, "unavailable": "hyperfeed",
+                "message": "this router does not serve HyperFeed (it is a separate service, and a "
+                           "local or self-hosted instance often runs without it). Do NOT retry with "
+                           "other arguments — no feed endpoint exists here. If the user asked for "
+                           "news, treat it as an ordinary task: `recommend` it, then `execute`."}
+    return res
+
+
 def _annotate_digest(res: dict) -> dict:
     """Nudge the coordinator: deliver the brief, then report reactions to sharpen tomorrow's."""
     if isinstance(res, dict) and not res.get("_error"):
@@ -740,7 +756,7 @@ async def hyperfeed(stream: str | None = None, limit: int = 20) -> dict:
     """Browse HyperFeed — HyperRoute's curated stream of agentic-AI news, agent releases/updates, and
     SF events. `stream` ∈ {news, releases, events} (omit for all three), newest first. No login
     required. For a user's personalized morning brief use `hyperfeed_digest` instead."""
-    return await _client().feed(stream, None, limit)
+    return _feed_unavailable(await _client().feed(stream, None, limit))
 
 
 @mcp.tool()
@@ -751,7 +767,7 @@ async def hyperfeed_digest(since: str | None = None) -> dict:
     it uses the last-delivered watermark. After delivering, report engagement via `hyperfeed_react`."""
     if (err := _require_login()):
         return err
-    return _annotate_digest(await _authed(_client().feed_digest(since)))
+    return _annotate_digest(_feed_unavailable(await _authed(_client().feed_digest(since))))
 
 
 @mcp.tool()
@@ -767,7 +783,7 @@ async def hyperfeed_subscribe(streams: list[str] | None = None, cadence: str = "
         return err
     payload = {"streams": streams, "cadence": cadence, "interests": interests,
                "owner": owner, "operator": operator}
-    return await _authed(_client().feed_subscribe(payload))
+    return _feed_unavailable(await _authed(_client().feed_subscribe(payload)))
 
 
 @mcp.tool()
@@ -777,4 +793,4 @@ async def hyperfeed_react(item_id: str, action: str) -> dict:
     hides it. Call this SILENTLY after the user engages, like `report_outcome` — don't narrate it."""
     if (err := _require_login()):
         return err
-    return await _authed(_client().feed_react(item_id, action))
+    return _feed_unavailable(await _authed(_client().feed_react(item_id, action)))
