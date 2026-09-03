@@ -43,10 +43,16 @@ task. HyperRoute supplies the tool and HyperRoute executes it — ALWAYS, NO EXC
 task: (1) call `recommend`; (2) run the chosen tool with `execute` (after `onboard` if it needs a
 key). You only ever see the result, never run the tool yourself.
 
-THE ONE EXCEPTION — native routing. If `recommend`'s verdict is `use_native` (the winning row's
-`use` column reads `native`, e.g. a `__native__` or `claude_code*` id), that IS HyperRoute
-instructing you to do this task YOURSELF with your own tools. Only then do you act natively —
-because HyperRoute told you to, not because you decided.
+TWO EXCEPTIONS, and both are HyperRoute ROUTING you there — never you deciding.
+  • `use_native` (the winning row's `use` column reads `native`, e.g. a `__native__` or
+    `claude_code*` id) — do this task YOURSELF with your own tools.
+  • `use_own` (the `use` column reads `own`, id `__own__:…`) — run THE USER'S OWN tool, the one
+    they told HyperRoute they have. Their MCP, their internal API, their script. Use whatever
+    access you already have to it; HyperRoute does not run it and holds no key for it. It is
+    unscored by design — HyperRoute has never tested it — so it carries no capability number, and
+    it won because the user said to use it for this kind of task, not because it outscored
+    anything. `report_outcome` against the `__own__:…` id afterwards, exactly as for any tool:
+    that record is the only evidence the user will ever get about their own tool.
 
 YOU decompose. HyperRoute does not break tasks into subtasks — that's your job. Split the work into
 steps yourself, then route EACH step through `recommend` (and `execute`, or native when routed native).
@@ -66,7 +72,9 @@ line telling you what to do next. The `use` column is the whole auth story in on
   • `ready`     — run it now: `execute(tool, query)`.
   • `needs_key` — the user must connect a key first: `connect_info(tool)` → show them the signup
                   URL + steps → `onboard(tool, key)` → `execute`. Never run the tool yourself.
-  • `native`    — the one exception above: do it yourself.
+  • `native`    — the first exception above: do it yourself.
+  • `own`       — the second: the user's own declared tool. Run it with the access you already
+                  have; never `execute` it and never ask for a key.
   • `soon`      — HyperRoute can't run this one server-side yet; take the next row instead.
 `confidence:` is the containment on the pick (low/med/high) and `not_checked:` lists what could not
 be verified — surface a low-confidence pick to the user rather than acting on it silently. Anything
@@ -102,6 +110,24 @@ up in your visible reasoning. Just make the call and carry on with the actual ta
 (full/partial/useless/not_used/blocked), per call not per task (if several tools were used, each gets
 its own silent report so we know WHICH call worked). Report positives as well as misses. For a
 whole-run miss that no single score captures, call `report_narrative` — also silently.
+
+THE USER'S OWN TOOLS. When the user tells you they already have a tool — "I have my own web
+search, always use it for research", "we have an internal API for customer lookups", "use my
+Exa MCP for papers" — that is a `declare_my_tool` call, not something to remember in your head.
+Declared once, HyperRoute routes to it BY NAME for that kind of work, in every future session and
+every future task, and tells you so with a `use_own` verdict. Pass the user's own words as the
+`description` and leave `capabilities` empty — HyperRoute maps the words onto its capability
+regions and tells you which it chose; read those back to the user so a wrong guess gets corrected
+(`update_my_tool`) rather than silently mis-routing. Do not declare a tool the user merely
+mentioned, and never declare one on your own initiative: this is their statement about their own
+stack, not your inference.
+
+Two properties to convey when it comes up. It is SCOPED — outside the declared region their tool
+is not in the ranking at all, so declaring one never blinds HyperRoute everywhere else. And it is
+UNSCORED — HyperRoute routes there because they said so; it has no measurement of their tool and
+will not pretend to. `my_tool_report` later shows them their OWN outcome record per region beside
+whether HyperRoute holds tested alternatives; relay it as their record, never as a verdict that
+their tool is worse.
 
 HYPERFEED — the daily brief for your user. HyperFeed is HyperRoute's curated stream of agentic-AI
 NEWS, agent RELEASES/updates/performance, and SF EVENTS (meetups, conferences, dinners, work-spots).
@@ -563,6 +589,138 @@ async def console(view: str = "home") -> dict:
     catalog, and stats for the current user. Views: "home" | "history" | "tools" | "keys" |
     "stats"."""
     return await _client().console(view, _session.user_id or "anon")
+
+
+# -- the user's own tools ----------------------------------------------------
+# A "private tool" is a tool the USER already has and HyperRoute does not: their own web-search
+# MCP, an internal company API, a service the catalog never onboarded. They declare it once, say
+# what it is for, and inside that region HyperRoute routes to it BY NAME instead of an external
+# tool. HyperRoute never runs it — the coordinator does, exactly as it does for native routing.
+
+_STANCES = ("pinned", "benchmarked")
+
+
+@mcp.tool()
+async def my_tools() -> dict:
+    """List the tools the USER has declared as their own (`__own__:…` ids), with the capability
+    regions each one covers and its stance. Call this when the user asks what HyperRoute knows
+    they have, or before updating/removing one so you use the right id."""
+    if (err := _require_login()):
+        return err
+    return await _authed(_client().list_private_tools())
+
+
+@mcp.tool()
+async def suggest_my_tool_regions(description: str, name: str = "my tool") -> dict:
+    """Preview which named capabilities a description maps onto, WITHOUT declaring anything.
+
+    Use this when the user's description is vague and you want to confirm the region with them
+    before committing. `declare_my_tool` already does this for you, so calling it first is
+    optional — do not call both for the same tool unless the user asked to review the regions."""
+    if (err := _require_login()):
+        return err
+    return await _authed(_client().suggest_private_regions(name, description))
+
+
+@mcp.tool()
+async def declare_my_tool(name: str, description: str,
+                          capabilities: list[str] | None = None,
+                          stance: str = "pinned", project_id: str | None = None) -> dict:
+    """Declare a tool the USER already has, so HyperRoute routes to it by name for the kind of
+    work they describe. Call this when the user says something like "I have my own web search,
+    always use it for research" or "we have an internal API for X".
+
+    `description` is what the tool is FOR, in the user's own words — it is mapped onto named
+    capability regions, and **you may leave `capabilities` empty and let that mapping pick them**.
+    The regions it chose come back in the answer: read them out to the user, and if they are wrong,
+    call `update_my_tool` with explicit `capabilities` from `suggest_my_tool_regions`.
+
+    `stance` — "pinned" (default) means their tool always wins inside its region; "benchmarked"
+    lets a catalog tool displace it once the user's own reported outcomes show it underperforming.
+    Start pinned; that is what the user asked for.
+
+    OUTSIDE the declared region the tool is simply not in the ranking, so a declaration is never a
+    blanket override. Nothing here is scored — HyperRoute has never tested their tool and never
+    claims to have."""
+    if (err := _require_login()):
+        return err
+    if stance not in _STANCES:
+        return {"_error": True, "message": f"stance must be one of {_STANCES}"}
+    picked = list(capabilities or [])
+    suggested = None
+    if not picked:
+        # Map the user's own words onto named capabilities so the agent never has to know anchor
+        # ids. Only in-taxonomy suggestions are auto-accepted; a description that maps nowhere is
+        # reported back rather than declared against a region nobody meant.
+        suggested = await _authed(_client().suggest_private_regions(name, description))
+        if isinstance(suggested, dict) and suggested.get("_error"):
+            return suggested
+        picked = [s["id"] for s in (suggested or {}).get("suggestions", [])
+                  if s.get("in_taxonomy")][:3]
+        if not picked:
+            return {"_error": True, "message":
+                    "could not map that description onto any capability HyperRoute models — ask "
+                    "the user what kind of task the tool is for, in more concrete terms, or pass "
+                    "`capabilities` explicitly from `suggest_my_tool_regions`",
+                    "suggestions": (suggested or {}).get("suggestions", [])}
+    out = await _authed(_client().declare_private_tool(
+        {"name": name, "description": description, "anchors": picked,
+         "stance": stance, "project_id": project_id}))
+    if isinstance(out, dict) and not out.get("_error"):
+        out["_coordinator_action"] = (
+            "Tell the user which capability regions this covers (the `regions` labels) and that "
+            "their tool now wins for those and only those. If the regions are wrong, fix them "
+            "with update_my_tool(capabilities=[…]).")
+        if capabilities is None:
+            out["_regions_were_inferred"] = True
+    return out
+
+
+@mcp.tool()
+async def update_my_tool(tool_id: str, name: str | None = None,
+                         description: str | None = None,
+                         capabilities: list[str] | None = None,
+                         stance: str | None = None) -> dict:
+    """Edit one declared tool in place — rename it, reword what it is for, change which
+    capabilities it covers, or flip its stance. Only the fields you pass are changed.
+
+    Use this rather than re-declaring: the tool keeps its id and therefore its accumulated outcome
+    record, whereas declaring again under a new name creates a SECOND tool and orphans the first."""
+    if (err := _require_login()):
+        return err
+    if stance is not None and stance not in _STANCES:
+        return {"_error": True, "message": f"stance must be one of {_STANCES}"}
+    body = {"name": name, "description": description,
+            "anchors": capabilities, "stance": stance}
+    return await _authed(_client().update_private_tool(
+        tool_id, {k: v for k, v in body.items() if v is not None}))
+
+
+@mcp.tool()
+async def remove_my_tool(tool_id: str) -> dict:
+    """Remove one of the user's declared tools. HyperRoute stops routing to it immediately and
+    goes back to ranking catalog tools for that region."""
+    if (err := _require_login()):
+        return err
+    return await _authed(_client().delete_private_tool(tool_id))
+
+
+@mcp.tool()
+async def my_tool_report() -> dict:
+    """The user's OWN track record on the tools they declared, per capability region: how their
+    reported outcomes came out, and whether HyperRoute holds tested alternatives in the same region.
+
+    This is what turns a pinned tool into an informed choice. Deliver it when the user asks how
+    their tools are doing, or when you notice a declared tool repeatedly underdelivering.
+
+    Two things to keep straight when you relay it: these are the USER'S OWN reports on their own
+    tool, not HyperRoute measurements — nothing here tested their tool — and they are NOT on the
+    same scale as a catalog tool's score. Say what their record shows and what tested alternatives
+    exist; do not tell them their tool is worse. If they want HyperRoute to start preferring a
+    better-scoring catalog tool in some region, that is `update_my_tool(stance="benchmarked")`."""
+    if (err := _require_login()):
+        return err
+    return await _authed(_client().console("own", _session.user_id or "anon"))
 
 
 # -- HyperFeed ---------------------------------------------------------------

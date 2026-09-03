@@ -149,6 +149,9 @@ whole product family.
 | `report_outcome` | Per-call feedback — the signal that sharpens future routing. |
 | `report_narrative` | Open-ended feedback about a whole run. |
 | `console` | Human-readable management view: history, tools, keys, stats. |
+| `my_tools` / `declare_my_tool` / `update_my_tool` / `remove_my_tool` | **Your own tools.** Tell HyperRoute about a tool you already have and what it's for; it then routes to it by name for that kind of work. |
+| `suggest_my_tool_regions` | Preview which capabilities a description maps onto, before declaring. |
+| `my_tool_report` | Your own track record on your declared tools, per capability. |
 | `use_token` / `register` / `verify` / `login` / `login_link` / `verify_login` / `forgot_password` / `whoami` | Account lifecycle. |
 | `hyperfeed` / `hyperfeed_digest` / `hyperfeed_subscribe` / `hyperfeed_react` | HyperFeed: curated agentic-AI news, agent releases, and SF events — plus your agent's personalized daily brief. |
 
@@ -175,6 +178,25 @@ order of magnitude cheaper in tokens than shipping the full object on every call
 
 The `use` column is the whole auth story: `ready` (run it) · `needs_key` (connect first) ·
 `native` (do it yourself) · `soon` (not runnable server-side yet).
+
+### Your own tools
+
+Tell your agent *"I have my own web search, always use it for research"* and it calls
+`declare_my_tool` with your words. HyperRoute maps them onto named capability regions and, from
+then on, routes to **your** tool for that kind of work — in every session, with a `use_own`
+verdict — instead of ranking a catalog tool. Your agent runs it with the access it already has;
+HyperRoute never executes it and holds no key for it.
+
+Two things it deliberately does *not* do:
+
+- **It is scoped.** Outside the region you declared, your tool is not in the ranking at all. A
+  declaration is never a blanket override.
+- **It is unscored.** HyperRoute has never tested your tool, so it carries no capability number
+  and never pretends to. It wins because you said so.
+
+`my_tool_report` later shows your **own** outcome record per capability, beside whether HyperRoute
+holds tested alternatives there. If you want a better-scoring catalog tool to be able to displace
+yours in some region, switch that tool to `stance="benchmarked"`.
 
 ### Two-pass refinement
 

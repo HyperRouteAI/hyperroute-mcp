@@ -147,10 +147,13 @@ class HyperRouteClient:
         return await self._request("GET", "/credentials", auth=True, params={"user_id": user_id})
 
     async def report_outcome(self, payload: dict) -> Any:
-        return await self._request("POST", "/report_outcome", json=payload)
+        """Gated: an outcome is a per-user mutation of the flywheel, and the router attributes the
+        write to the AUTHENTICATED account (it will not take a caller-supplied identity). Without
+        the bearer this is a flat 401, so the whole reporting hook silently stops working."""
+        return await self._request("POST", "/report_outcome", auth=True, json=payload)
 
     async def report_narrative(self, payload: dict) -> Any:
-        return await self._request("POST", "/report_narrative", json=payload)
+        return await self._request("POST", "/report_narrative", auth=True, json=payload)
 
     async def console(self, view: str, user_id: str) -> Any:
         return await self._request("GET", "/console", auth=True,
@@ -166,6 +169,30 @@ class HyperRouteClient:
     async def set_preferences(self, facets: dict, project_id: str | None = None) -> Any:
         return await self._request("PUT", "/preferences", auth=True,
                                    json={"facets": facets, "project_id": project_id})
+
+    # -- private tools (the caller's own declared tools) ---------------------
+    async def list_private_tools(self, project_id: str | None = None) -> Any:
+        return await self._request("GET", "/private-tools", auth=True,
+                                   params={"project_id": project_id})
+
+    async def suggest_private_regions(self, name: str, description: str | None = None) -> Any:
+        return await self._request("POST", "/private-tools/suggest", auth=True,
+                                   json={"name": name, "description": description})
+
+    async def declare_private_tool(self, payload: dict) -> Any:
+        return await self._request("PUT", "/private-tools", auth=True, json=payload)
+
+    async def update_private_tool(self, tool_id: str, payload: dict) -> Any:
+        return await self._request("PATCH", f"/private-tools/{tool_id}", auth=True, json=payload)
+
+    async def set_private_stance(self, tool_id: str, stance: str,
+                                 project_id: str | None = None) -> Any:
+        return await self._request("POST", f"/private-tools/{tool_id}/stance", auth=True,
+                                   params={"stance": stance, "project_id": project_id})
+
+    async def delete_private_tool(self, tool_id: str, project_id: str | None = None) -> Any:
+        return await self._request("DELETE", f"/private-tools/{tool_id}", auth=True,
+                                   params={"project_id": project_id})
 
     # -- HyperFeed ----------------------------------------------------------
     async def feed(self, stream: str | None = None, since: str | None = None,

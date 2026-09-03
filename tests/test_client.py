@@ -102,3 +102,49 @@ async def test_no_bearer_is_sent_when_logged_out(patched):
     t = patched(httpx.Response(200, json={}))
     await HyperRouteClient("http://router.test", Session()).whoami()
     assert "authorization" not in t.request.headers
+
+
+# -- private tools + the gated report path -----------------------------------
+
+async def _capture(method, *args, **kwargs):
+    """Run one client call against a canned 200 and hand back the outgoing request."""
+    t = _Transport(_resp(200, {"ok": True}))
+    c = HyperRouteClient("http://router.test", Session("hyr_k"), timeout=5)
+    import httpx as _httpx
+    real = _httpx.AsyncClient
+
+    def _patched(*a, **kw):
+        return real(*a, **{**kw, "transport": t})
+    _httpx.AsyncClient = _patched
+    try:
+        await getattr(c, method)(*args, **kwargs)
+    finally:
+        _httpx.AsyncClient = real
+    return t.request
+
+
+async def test_report_outcome_is_authenticated():
+    """The router gates it and attributes the write to the authenticated account; unauthenticated
+    it is a flat 401 and the whole reporting hook silently stops working."""
+    req = await _capture("report_outcome", {"session_id": "s-1", "tool_id": "t", "score": "full"})
+    assert req.headers.get("authorization") == "Bearer hyr_k"
+
+
+async def test_report_narrative_is_authenticated():
+    req = await _capture("report_narrative", {"text": "x"})
+    assert req.headers.get("authorization") == "Bearer hyr_k"
+
+
+async def test_private_tool_calls_are_authenticated_and_well_addressed():
+    req = await _capture("declare_private_tool", {"name": "n", "anchors": ["a"]})
+    assert req.method == "PUT" and req.url.path == "/private-tools"
+    assert req.headers.get("authorization") == "Bearer hyr_k"
+
+    req = await _capture("update_private_tool", "__own__:my_search", {"description": "d"})
+    assert req.method == "PATCH" and req.url.path == "/private-tools/__own__:my_search"
+
+    req = await _capture("delete_private_tool", "__own__:my_search")
+    assert req.method == "DELETE" and req.url.path == "/private-tools/__own__:my_search"
+
+    req = await _capture("suggest_private_regions", "n", "d")
+    assert req.method == "POST" and req.url.path == "/private-tools/suggest"

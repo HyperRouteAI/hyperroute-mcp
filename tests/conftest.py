@@ -62,3 +62,44 @@ class FakeClient:
     async def execute(self, tool_id, query):
         self._record("execute", {"tool_id": tool_id, "query": query})
         return self.answers.get("execute", {"result": "ok"})
+
+    async def console(self, view, user_id):
+        self._record("console", {"view": view, "user_id": user_id})
+        return self.answers.get("console", {"view": view, "tools": []})
+
+    # -- private tools ------------------------------------------------------
+    SUGGESTIONS = {"suggestions": [
+        {"id": "web_search_realtime", "label": "Realtime web search",
+         "similarity": 0.71, "in_taxonomy": True},
+        {"id": "academic_paper_search", "label": "Academic paper search",
+         "similarity": 0.52, "in_taxonomy": True},
+        {"id": "hotel_search_booking", "label": "Hotel booking",
+         "similarity": 0.18, "in_taxonomy": False},
+    ]}
+
+    async def list_private_tools(self, project_id=None):
+        self._record("list_private_tools", {"project_id": project_id})
+        return self.answers.get("list_private_tools", {"tools": []})
+
+    async def suggest_private_regions(self, name, description=None):
+        self._record("suggest_private_regions", {"name": name, "description": description})
+        return self.answers.get("suggest_private_regions", self.SUGGESTIONS)
+
+    async def declare_private_tool(self, payload):
+        self._record("declare_private_tool", payload)
+        return self.answers.get("declare_private_tool", {
+            "declared": {"tool_id": "__own__:my_search", **payload},
+            "regions": [{"id": a, "label": a} for a in payload.get("anchors", [])]})
+
+    async def update_private_tool(self, tool_id, payload):
+        self._record("update_private_tool", {"tool_id": tool_id, **payload})
+        return self.answers.get("update_private_tool",
+                                {"updated": {"tool_id": tool_id, **payload}})
+
+    async def set_private_stance(self, tool_id, stance, project_id=None):
+        self._record("set_private_stance", {"tool_id": tool_id, "stance": stance})
+        return self.answers.get("set_private_stance", {"updated": {"tool_id": tool_id}})
+
+    async def delete_private_tool(self, tool_id, project_id=None):
+        self._record("delete_private_tool", {"tool_id": tool_id})
+        return self.answers.get("delete_private_tool", {"deleted": True})
