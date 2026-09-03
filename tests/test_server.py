@@ -210,6 +210,8 @@ async def test_declare_infers_the_region_from_the_users_own_words(fake, logged_i
     out = await server.declare_my_tool("My Search", "my own realtime web search mcp")
     assert fake.last("suggest_private_regions")["description"] == "my own realtime web search mcp"
     sent = fake.last("declare_private_tool")
+    # every in-taxonomy candidate, not a truncated top-N: dropping the lower-ranked ones is how a
+    # tool loses the region its owner plainly described (see the crawler-skill regression)
     assert sent["anchors"] == ["web_search_realtime", "academic_paper_search"]
     assert "hotel_search_booking" not in sent["anchors"], "an out-of-taxonomy guess was accepted"
     assert out["_regions_were_inferred"] is True

@@ -644,8 +644,12 @@ async def declare_my_tool(name: str, description: str,
         suggested = await _authed(_client().suggest_private_regions(name, description))
         if isinstance(suggested, dict) and suggested.get("_error"):
             return suggested
+        # Every in-taxonomy candidate, not the top few. A region is usually several things
+        # ("browse, scrape, query and read websites" is four verbs), and truncating drops the ones
+        # a skewed ranking put lower — which is how a crawler skill lost `web_scraping_structured`
+        # and then missed "read this website". The router applies its own cap.
         picked = [s["id"] for s in (suggested or {}).get("suggestions", [])
-                  if s.get("in_taxonomy")][:3]
+                  if s.get("in_taxonomy")]
         if not picked:
             return {"_error": True, "message":
                     "could not map that description onto any capability HyperRoute models — ask "
