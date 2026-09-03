@@ -193,23 +193,3 @@ class HyperRouteClient:
     async def delete_private_tool(self, tool_id: str, project_id: str | None = None) -> Any:
         return await self._request("DELETE", f"/private-tools/{tool_id}", auth=True,
                                    params={"project_id": project_id})
-
-    # -- HyperFeed ----------------------------------------------------------
-    async def feed(self, stream: str | None = None, since: str | None = None,
-                   limit: int = 50) -> Any:
-        return await self._request("GET", "/feed",
-                                   params={"stream": stream, "since": since, "limit": limit})
-
-    async def feed_streams(self) -> Any:
-        return await self._request("GET", "/feed/streams")
-
-    async def feed_digest(self, since: str | None = None, limit: int = 20) -> Any:
-        return await self._request("GET", "/feed/digest", auth=True,
-                                   params={"since": since, "limit": limit})
-
-    async def feed_subscribe(self, payload: dict) -> Any:
-        return await self._request("POST", "/feed/subscribe", auth=True, json=payload)
-
-    async def feed_react(self, item_id: str, action: str) -> Any:
-        return await self._request("POST", "/feed/react", auth=True,
-                                   json={"item_id": item_id, "action": action})

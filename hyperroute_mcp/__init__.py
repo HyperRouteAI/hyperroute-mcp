@@ -1,5 +1,5 @@
 """HyperRoute MCP — a Model Context Protocol server that exposes the HyperRoute router
-(register, login, recommend, describe, onboard, execute, report_outcome, HyperFeed, …) as MCP
+(register, login, recommend, describe, onboard, execute, report_outcome, …) as MCP
 tools, so a coordinator agent (Claude Code, Codex, Goose, Cursor, …) can drive the whole product
 end-to-end in one conversation.
 

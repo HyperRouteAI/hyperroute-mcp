@@ -12,8 +12,7 @@ TOOLS = {"session_info", "health", "recommend", "describe", "execute", "onboard"
          "report_outcome", "report_narrative", "facets_catalog", "get_preferences",
          "set_preferences", "list_credentials", "fetch_result", "console", "use_token",
          "register", "verify", "login", "login_link", "verify_login", "forgot_password",
-         "whoami", "hyperfeed", "hyperfeed_digest", "hyperfeed_subscribe", "hyperfeed_react",
-         "my_tools", "suggest_my_tool_regions", "declare_my_tool", "update_my_tool",
+         "whoami", "my_tools", "suggest_my_tool_regions", "declare_my_tool", "update_my_tool",
          "remove_my_tool", "my_tool_report"}
 
 
@@ -132,8 +131,8 @@ async def test_describe_forwards_the_route_relative_query(fake):
     lambda: server.get_preferences(),
     lambda: server.set_preferences({}),
     lambda: server.fetch_result("ref"),
-    lambda: server.hyperfeed_digest(),
-    lambda: server.hyperfeed_react("i", "up"),
+    lambda: server.my_tools(),
+    lambda: server.my_tool_report(),
 ])
 async def test_gated_tools_refuse_when_logged_out(monkeypatch, call):
     monkeypatch.setattr(server, "_session", Session())
@@ -271,37 +270,3 @@ async def test_instructions_teach_declaring_and_the_own_verdict():
     assert "SCOPED" in text and "UNSCORED" in text
     assert "report_outcome` against the `__own__:" in text
 
-
-# -- HyperFeed on a router that does not serve it ----------------------------
-
-async def test_a_404_feed_says_not_deployed_here_not_bad_request(logged_in, monkeypatch):
-    """A bare 404 reads to a model as "wrong argument", so it retries with different parameters
-    before giving up. HyperFeed is a separate service and a local router legitimately lacks it —
-    that is a different fact from a bad request, and only one of them is worth a second attempt."""
-    c = FakeClient()
-
-    async def _404(*a, **k):
-        return {"_error": True, "_http_status": 404}
-    for name in ("feed", "feed_digest", "feed_subscribe", "feed_react"):
-        setattr(c, name, _404)
-    monkeypatch.setattr(server, "_client", lambda: c)
-
-    for call in (server.hyperfeed(), server.hyperfeed_digest(),
-                 server.hyperfeed_subscribe(), server.hyperfeed_react("i", "open")):
-        out = await call
-        assert out["unavailable"] == "hyperfeed"
-        assert "Do NOT retry" in out["message"]
-        assert "recommend" in out["message"], "must point at the fallback that actually works"
-
-
-async def test_a_working_feed_is_untouched(logged_in, monkeypatch):
-    c = FakeClient()
-
-    async def _ok(*a, **k):
-        return {"items": [{"id": "x"}], "fresh_count": 1}
-    for name in ("feed", "feed_digest"):
-        setattr(c, name, _ok)
-    monkeypatch.setattr(server, "_client", lambda: c)
-    assert (await server.hyperfeed())["items"] == [{"id": "x"}]
-    dig = await server.hyperfeed_digest()
-    assert dig["items"] == [{"id": "x"}] and "_coordinator_action" in dig
