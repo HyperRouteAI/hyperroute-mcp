@@ -153,7 +153,6 @@ whole product family.
 | `suggest_my_tool_regions` | Preview which capabilities a description maps onto, before declaring. |
 | `my_tool_report` | Your own track record on your declared tools, per capability. |
 | `use_token` / `register` / `verify` / `login` / `login_link` / `verify_login` / `forgot_password` / `whoami` | Account lifecycle. |
-| `hyperfeed` / `hyperfeed_digest` / `hyperfeed_subscribe` / `hyperfeed_react` | HyperFeed: curated agentic-AI news, agent releases, and SF events — plus your agent's personalized daily brief. |
 
 ### The wire is deliberately lean
 
