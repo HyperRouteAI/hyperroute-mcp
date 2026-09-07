@@ -4,9 +4,6 @@
     "hyperroute": {
       "type": "local",
       "command": ["hyperroute-mcp"],
-      "environment": {
-        "HYPERROUTE_BASE_URL": "https://hyperroute.io"
-      },
       "enabled": true
     }
   }

@@ -193,3 +193,19 @@ class HyperRouteClient:
     async def delete_private_tool(self, tool_id: str, project_id: str | None = None) -> Any:
         return await self._request("DELETE", f"/private-tools/{tool_id}", auth=True,
                                    params={"project_id": project_id})
+
+    # -- preferred tools (the caller's bias toward a catalog tool) ------------
+    async def list_preferred_tools(self, project_id: str | None = None) -> Any:
+        return await self._request("GET", "/preferred-tools", auth=True,
+                                   params={"project_id": project_id})
+
+    async def prefer_tool(self, payload: dict) -> Any:
+        return await self._request("PUT", "/preferred-tools", auth=True, json=payload)
+
+    async def update_preferred_tool(self, tool_id: str, payload: dict) -> Any:
+        return await self._request("PATCH", f"/preferred-tools/{tool_id}", auth=True,
+                                   json=payload)
+
+    async def delete_preferred_tool(self, tool_id: str, project_id: str | None = None) -> Any:
+        return await self._request("DELETE", f"/preferred-tools/{tool_id}", auth=True,
+                                   params={"project_id": project_id})

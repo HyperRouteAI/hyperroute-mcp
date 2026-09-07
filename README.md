@@ -64,9 +64,9 @@ that venv is active — and MCP clients launch the server themselves, outside yo
 absolute path in that case: `/path/to/.venv/bin/hyperroute-mcp`.
 
 **OpenCode** — copy [`opencode.json`](opencode.json) into your project. OpenCode is bring-your-own-model,
-so the server can't infer what you're running from the client name alone: set `HYPERROUTE_COORDINATOR`
-(or `HYPERROUTE_NATIVE_TOOLS`) to match the model you actually point it at, or HyperRoute will have no
-baseline for you. [`AGENTS.md`](AGENTS.md) carries the operating loop and the methodology — drop it in
+so the server can't infer what you're running from the client name alone: add an `"environment"` block
+setting `HYPERROUTE_COORDINATOR` (or `HYPERROUTE_NATIVE_TOOLS`) to match the model you actually point
+it at, or HyperRoute will have no baseline for you. [`AGENTS.md`](AGENTS.md) carries the operating loop and the methodology — drop it in
 so the agent can both act correctly and explain how the routing works.
 
 **Any MCP client** (`mcp.json` / `claude_desktop_config.json` / equivalent):
@@ -75,11 +75,18 @@ so the agent can both act correctly and explain how the routing works.
 {
   "mcpServers": {
     "hyperroute": {
-      "command": "hyperroute-mcp",
-      "env": { "HYPERROUTE_BASE_URL": "https://hyperroute.io" }
+      "command": "hyperroute-mcp"
     }
   }
 }
+```
+
+**No base URL to set.** The package talks to `https://hyperroute.io` out of the box; you only set
+`HYPERROUTE_BASE_URL` to point it somewhere else — a local dev router, or your own self-hosted
+instance:
+
+```json
+"env": { "HYPERROUTE_BASE_URL": "http://localhost:8077" }
 ```
 
 Then just ask: *"Use HyperRoute to find the best tool for searching recent papers, connect my
@@ -123,7 +130,7 @@ whole product family.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `HYPERROUTE_BASE_URL` | `https://hyperroute.io` | Which router to talk to. Override to point at a different instance. |
+| `HYPERROUTE_BASE_URL` | `https://hyperroute.io` | Which router to talk to. Leave unset for the hosted one; set it only for a local dev or self-hosted instance. |
 | `HYPERROUTE_API_KEY` | — | `hyr_…` token to start already logged in. Externally managed: used, never cached. |
 | `HYPERROUTE_TIMEOUT` | `30` | Per-request timeout, seconds. |
 | `HYPERROUTE_TOKEN_FILE` | `~/.hyperroute/token.json` | Where the cached login lives. |
@@ -152,6 +159,7 @@ whole product family.
 | `my_tools` / `declare_my_tool` / `update_my_tool` / `remove_my_tool` | **Your own tools.** Tell HyperRoute about a tool you already have and what it's for; it then routes to it by name for that kind of work. |
 | `suggest_my_tool_regions` | Preview which capabilities a description maps onto, before declaring. |
 | `my_tool_report` | Your own track record on your declared tools, per capability. |
+| `my_preferred_tools` / `prefer_tool` / `update_preferred_tool` / `unprefer_tool` | **Your preferred tools.** Favour a catalog tool: it is served whenever it's acceptable and within your margin of the best. |
 | `use_token` / `register` / `verify` / `login` / `login_link` / `verify_login` / `forgot_password` / `whoami` | Account lifecycle. |
 
 ### The wire is deliberately lean
@@ -197,6 +205,21 @@ Two things it deliberately does *not* do:
 holds tested alternatives there. If you want a better-scoring catalog tool to be able to displace
 yours in some region, switch that tool to `stance="benchmarked"`.
 
+### Your preferred tools
+
+Tell your agent *"I like Kagi — whenever it's even remotely acceptable, use it"* and it calls
+`prefer_tool`. Unlike your own tools, a preferred tool is one HyperRoute already has and scores;
+the preference only changes which **acceptable** tool wins: it is served whenever it clears the
+capability bar for the task and sits within your **margin** (default 0.10) of the best-scoring
+tool. Beyond the margin, or under the bar, the ranking is served as it would have been and the
+ranking's `preferred:` line says your tool was passed over and by how much — it never disappears
+silently. A hard requirement you set (a `must_be` compliance check) still excludes it: your
+constraints outrank your bias.
+
+```
+preferred: Kagi Search — served: 0.08 behind Brave Search on capability, within your 0.10 margin
+```
+
 ### Two-pass refinement
 
 Pass 1 always returns a usable ranking. The `refine:` line names the unset preferences that would
@@ -213,7 +236,7 @@ ruff check .
 ```
 
 The suite is fully offline — the router is faked, so no network and no real account are touched.
-Set `HYPERROUTE_BASE_URL` to try it against a different router instance.
+Set `HYPERROUTE_BASE_URL` to run against a local router instead of the hosted one.
 
 ## License
 

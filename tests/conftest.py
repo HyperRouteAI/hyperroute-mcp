@@ -103,3 +103,23 @@ class FakeClient:
     async def delete_private_tool(self, tool_id, project_id=None):
         self._record("delete_private_tool", {"tool_id": tool_id})
         return self.answers.get("delete_private_tool", {"deleted": True})
+
+    # -- preferred tools ----------------------------------------------------
+    async def list_preferred_tools(self, project_id=None):
+        self._record("list_preferred_tools", {"project_id": project_id})
+        return self.answers.get("list_preferred_tools", {"tools": []})
+
+    async def prefer_tool(self, payload):
+        self._record("prefer_tool", payload)
+        return self.answers.get("prefer_tool", {
+            "preferred": {"tool_id": "kagi_search", "margin": payload.get("margin") or 0.1,
+                          "note": payload.get("note") or "", "name": "Kagi Search"},
+            "tool": {"id": "kagi_search", "name": "Kagi Search"}})
+
+    async def update_preferred_tool(self, tool_id, payload):
+        self._record("update_preferred_tool", {"tool_id": tool_id, **payload})
+        return self.answers.get("update_preferred_tool", {"updated": {"tool_id": tool_id, **payload}})
+
+    async def delete_preferred_tool(self, tool_id, project_id=None):
+        self._record("delete_preferred_tool", {"tool_id": tool_id})
+        return self.answers.get("delete_preferred_tool", {"deleted": True})

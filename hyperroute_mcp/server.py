@@ -129,6 +129,19 @@ will not pretend to. `my_tool_report` later shows them their OWN outcome record 
 whether HyperRoute holds tested alternatives; relay it as their record, never as a verdict that
 their tool is worse.
 
+THE USER'S PREFERRED TOOLS. When the user says they LIKE a tool HyperRoute already has — "I like
+Kagi, use it whenever it's even remotely acceptable", "prefer Perplexity for research" — that is a
+`prefer_tool` call, made immediately, with their wording as `tool`. Different from declaring their
+own tool: a preferred tool is in HyperRoute's catalog and stays scored; the preference only makes
+it win whenever it is acceptable for the task and within a capability MARGIN of the best tool
+(default 0.10 — pass `margin` when they say how strong the bias is: "unless something is much
+better" is wider). If the name is ambiguous the call comes back with `candidates`: ask the user
+which one, never pick. Every later ranking carries a `preferred:` line — `served` means their
+preference won (act on it as on any winner); `passed over` means the best tool beat it by more
+than their margin, or it was under the capability bar. On a passed-over preference proceed with
+the ranking's pick and tell the user in ONE line that their preferred tool was passed over and by
+how much; never run it anyway — they set the margin. Never prefer a tool on your own initiative.
+
 LOGIN IS PERSISTENT. Once the user authenticates, the token is saved and reused across sessions.
 Don't ask them to log in again unless a tool reports the token is invalid (401)."""
 
@@ -714,3 +727,75 @@ async def my_tool_report() -> dict:
     if (err := _require_login()):
         return err
     return await _authed(_client().console("own", _session.user_id or "anon"))
+
+
+# -- the user's preferred tools ----------------------------------------------
+# A "preferred tool" is a CATALOG tool the user favours: "I like Kagi — whenever it's even
+# remotely acceptable, use it." It stays scored; the preference only makes it win whenever it is
+# acceptable for the task and within a capability margin of the best candidate. Different from a
+# private tool (which HyperRoute does not have and never scores).
+
+@mcp.tool()
+async def my_preferred_tools() -> dict:
+    """List the catalog tools the USER has asked HyperRoute to favour, each with its margin and
+    note. Call this when the user asks what HyperRoute leans toward, or before changing/removing
+    one so you use the right id."""
+    if (err := _require_login()):
+        return err
+    return await _authed(_client().list_preferred_tools())
+
+
+@mcp.tool()
+async def prefer_tool(tool: str, margin: float | None = None, note: str = "",
+                      project_id: str | None = None) -> dict:
+    """Favour a catalog tool: from now on HyperRoute serves it whenever it is acceptable for a task
+    and within `margin` of the best tool on capability. Call this when the user says something like
+    "I like Kagi, use it whenever it's even remotely acceptable" or "prefer Perplexity for research".
+
+    `tool` is the user's own wording — a product name or an id; HyperRoute resolves it. If it is
+    ambiguous (e.g. "Perplexity" is two tools) the answer carries `candidates`: ask the user which
+    one and call again with its id. Never pick for them.
+
+    `margin` is how far behind the best tool the preferred one may sit and still be served (default
+    0.10 on the 0–1 capability scale). Widen it when the user says "unless something is much
+    better"; narrow it for "only when it's basically as good". `note` is their wording, shown back
+    to them on their tools page.
+
+    A preferred tool a hard requirement (a `must_be` compliance check) excludes stays excluded —
+    the user's constraints outrank the user's bias. Every later ranking says on its `preferred:`
+    line whether the preference was served or passed over."""
+    if (err := _require_login()):
+        return err
+    out = await _authed(_client().prefer_tool(
+        {"tool": tool, "margin": margin, "note": note, "project_id": project_id}))
+    if isinstance(out, dict) and out.get("_error") and out.get("candidates"):
+        out["_coordinator_action"] = ("Ask the user which of `candidates` they mean, then call "
+                                      "prefer_tool again with that tool's id.")
+    elif isinstance(out, dict) and not out.get("_error"):
+        pref = out.get("preferred") or {}
+        out["_coordinator_action"] = (
+            f"Tell the user HyperRoute will now use {(out.get('tool') or {}).get('name') or tool} "
+            f"whenever it is acceptable and within {float(pref.get('margin', 0.1)):.2f} of the best "
+            "tool on capability, and that each ranking will say whether it was served or passed over.")
+    return out
+
+
+@mcp.tool()
+async def update_preferred_tool(tool_id: str, margin: float | None = None,
+                                note: str | None = None) -> dict:
+    """Change one preference's margin or note; only the fields you pass are changed. Use this when
+    the user says the bias should be stronger or weaker ("actually, only use it when it's nearly as
+    good")."""
+    if (err := _require_login()):
+        return err
+    body = {"margin": margin, "note": note}
+    return await _authed(_client().update_preferred_tool(
+        tool_id, {k: v for k, v in body.items() if v is not None}))
+
+
+@mcp.tool()
+async def unprefer_tool(tool_id: str) -> dict:
+    """Remove one preference. HyperRoute goes back to ranking that tool on its score alone."""
+    if (err := _require_login()):
+        return err
+    return await _authed(_client().delete_preferred_tool(tool_id))
