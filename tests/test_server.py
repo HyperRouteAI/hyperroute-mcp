@@ -13,7 +13,8 @@ TOOLS = {"session_info", "health", "recommend", "describe", "execute", "onboard"
          "set_preferences", "list_credentials", "fetch_result", "console", "use_token",
          "register", "verify", "login", "login_link", "verify_login", "forgot_password",
          "whoami", "my_tools", "suggest_my_tool_regions", "declare_my_tool", "update_my_tool",
-         "remove_my_tool", "my_tool_report"}
+         "remove_my_tool", "my_tool_report", "my_preferred_tools", "prefer_tool",
+         "update_preferred_tool", "unprefer_tool"}
 
 
 @pytest.fixture
@@ -271,4 +272,49 @@ async def test_instructions_teach_declaring_and_the_own_verdict():
     # the two honesty properties the surface must convey
     assert "SCOPED" in text and "UNSCORED" in text
     assert "report_outcome` against the `__own__:" in text
+
+
+# -- preferred tools ---------------------------------------------------------
+async def test_preferred_tool_verbs_require_login(fake, monkeypatch):
+    monkeypatch.setattr(server, "_session", Session())
+    for call in (server.my_preferred_tools(), server.prefer_tool("kagi"),
+                 server.update_preferred_tool("kagi_search", margin=0.2),
+                 server.unprefer_tool("kagi_search")):
+        assert (await call)["_error"] is True
+    assert fake.calls == [], "a logged-out verb must not hit the router at all"
+
+
+async def test_prefer_sends_the_users_wording_and_tells_the_agent_what_to_say(fake, logged_in):
+    out = await server.prefer_tool("Kagi", note="I like it")
+    sent = fake.last("prefer_tool")
+    assert sent["tool"] == "Kagi" and sent["note"] == "I like it" and sent["margin"] is None
+    assert "whenever it is acceptable" in out["_coordinator_action"]
+    assert "0.10" in out["_coordinator_action"]
+
+
+async def test_an_ambiguous_name_is_handed_back_to_ask_not_guessed(logged_in, monkeypatch):
+    c = FakeClient(prefer_tool={"_error": True, "_http_status": 422, "error": "ambiguous_tool",
+                                "candidates": [{"id": "perplexity_sonar", "name": "Perplexity Sonar"},
+                                               {"id": "sonar_deep_research", "name": "Deep Research"}]})
+    monkeypatch.setattr(server, "_client", lambda: c)
+    out = await server.prefer_tool("perplexity")
+    assert out["_error"] is True and len(out["candidates"]) == 2
+    assert "Ask the user" in out["_coordinator_action"]
+
+
+async def test_update_sends_only_the_preference_fields_given(fake, logged_in):
+    await server.update_preferred_tool("kagi_search", margin=0.25)
+    assert fake.last("update_preferred_tool") == {"tool_id": "kagi_search", "margin": 0.25}
+
+
+async def test_unprefer_and_list(fake, logged_in):
+    assert (await server.unprefer_tool("kagi_search"))["deleted"] is True
+    await server.my_preferred_tools()
+    assert fake.last("list_preferred_tools") == {"project_id": None}
+
+
+async def test_instructions_teach_preferring_and_the_passed_over_line():
+    text = server.mcp.instructions or ""
+    assert "prefer_tool" in text and "Never prefer a tool on your own initiative" in text
+    assert "passed over" in text and "MARGIN" in text
 
