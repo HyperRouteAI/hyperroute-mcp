@@ -198,48 +198,73 @@ async def test_private_tool_verbs_require_login(fake, monkeypatch):
     monkeypatch.setattr(server, "_session", Session())
     for call in (server.my_tools(), server.my_tool_report(),
                  server.suggest_my_tool_regions("x"),
-                 server.declare_my_tool("x", "y"),
+                 server.declare_my_tool("x", ["y"]),
                  server.update_my_tool("__own__:x", name="z"),
                  server.remove_my_tool("__own__:x")):
         assert (await call)["_error"] is True
     assert fake.calls == [], "a logged-out verb must not hit the router at all"
 
 
-async def test_declare_infers_the_region_from_the_users_own_words(fake, logged_in):
-    """The agent should never have to know anchor ids: the description is mapped, and only
-    in-taxonomy suggestions are accepted."""
-    out = await server.declare_my_tool("My Search", "my own realtime web search mcp")
-    assert fake.last("suggest_private_regions")["description"] == "my own realtime web search mcp"
+async def test_declare_sends_the_users_sentence_verbatim(fake, logged_in):
+    """The trigger IS the declaration (specs/00): it goes to the router exactly as the user said
+    it, and nothing about the region path runs — a rule is not a place in capability space."""
+    out = await server.declare_my_tool(
+        "ivanspersonalVPN", ["use it whenever I need to do a vpn connect"])
     sent = fake.last("declare_private_tool")
-    # every in-taxonomy candidate, not a truncated top-N: dropping the lower-ranked ones is how a
-    # tool loses the region its owner plainly described (see the crawler-skill regression)
-    assert sent["anchors"] == ["web_search_realtime", "academic_paper_search"]
-    assert "hotel_search_booking" not in sent["anchors"], "an out-of-taxonomy guess was accepted"
-    assert out["_regions_were_inferred"] is True
-    assert "regions" in out["_coordinator_action"]
+    assert sent["triggers"] == ["use it whenever I need to do a vpn connect"]
+    assert sent["anchors"] == []
+    assert not any(n == "suggest_private_regions" for n, _ in fake.calls), \
+        "declaring must not spend a shared-GPU inference on wording that routes nothing"
+    assert "triggers" in out["_coordinator_action"]
 
 
-async def test_explicit_capabilities_skip_the_mapping(fake, logged_in):
-    await server.declare_my_tool("My Search", "whatever", capabilities=["academic_paper_search"])
+async def test_declare_without_a_trigger_asks_for_the_sentence(fake, logged_in):
+    """The router refuses a triggerless declaration; say so in terms of the MISSING FIELD.
+
+    Reported as a description problem, an agent rewords `description` forever against a wall it
+    cannot see — which is exactly what happened when the router moved to triggers ahead of us."""
+    out = await server.declare_my_tool("ivanspersonalVPN", [], description="a vpn tool")
+    assert out["_error"] is True and "triggers" in out["message"]
+    assert not any(n == "declare_private_tool" for n, _ in fake.calls), "nothing should be declared"
+
+
+async def test_a_single_sentence_is_not_split_into_characters(fake, logged_in):
+    """A model asked for a list of sentences routinely sends one sentence."""
+    await server.declare_my_tool("My Search", "always use it for research")
+    assert fake.last("declare_private_tool")["triggers"] == ["always use it for research"]
+
+
+async def test_capabilities_are_passed_through_as_report_wording_only(fake, logged_in):
+    await server.declare_my_tool("My Search", ["for papers use my thing"],
+                                 capabilities=["academic_paper_search"])
     assert fake.last("declare_private_tool")["anchors"] == ["academic_paper_search"]
     assert not any(n == "suggest_private_regions" for n, _ in fake.calls)
 
 
-async def test_a_description_that_maps_nowhere_is_reported_not_declared(logged_in, monkeypatch):
+async def test_a_description_that_maps_nowhere_still_declares(logged_in, monkeypatch):
+    """A poor anchor match must never block a declaration: anchors route nothing (specs/40)."""
     c = FakeClient(suggest_private_regions={"suggestions": [
         {"id": "hotel_search_booking", "label": "Hotel booking",
          "similarity": 0.1, "in_taxonomy": False}]})
     monkeypatch.setattr(server, "_client", lambda: c)
-    out = await server.declare_my_tool("thing", "asdfasdf")
-    assert out["_error"] is True and "could not map" in out["message"]
-    assert not any(n == "declare_private_tool" for n, _ in c.calls), "nothing should be declared"
+    out = await server.declare_my_tool("thing", ["use it for the weird internal thing"],
+                                       description="asdfasdf")
+    assert not out.get("_error")
+    assert c.last("declare_private_tool")["triggers"] == ["use it for the weird internal thing"]
 
 
 async def test_declare_defaults_to_pinned_and_validates_stance(fake, logged_in):
-    await server.declare_my_tool("My Search", "web search")
+    await server.declare_my_tool("My Search", ["use it for web search"])
     assert fake.last("declare_private_tool")["stance"] == "pinned"
-    bad = await server.declare_my_tool("x", "y", stance="whatever")
+    bad = await server.declare_my_tool("x", ["y"], stance="whatever")
     assert bad["_error"] is True and "stance must be" in bad["message"]
+
+
+async def test_update_replaces_the_whole_trigger_list_and_refuses_an_empty_one(fake, logged_in):
+    await server.update_my_tool("__own__:x", triggers=["only for work files"])
+    assert fake.last("update_private_tool")["triggers"] == ["only for work files"]
+    out = await server.update_my_tool("__own__:x", triggers=[" "])
+    assert out["_error"] is True and "at least one trigger" in out["message"]
 
 
 async def test_update_sends_only_the_fields_given(fake, logged_in):
@@ -270,7 +295,10 @@ async def test_instructions_teach_declaring_and_the_own_verdict():
     assert "declare_my_tool" in text
     assert "never declare one on your own initiative" in text
     # the two honesty properties the surface must convey
-    assert "SCOPED" in text and "UNSCORED" in text
+    assert "CONDITIONAL" in text and "UNSCORED" in text
+    # the trigger model, not the retired region model
+    assert "VERBATIM" in text and "context.situation" in text
+    assert "consider" in text
     assert "report_outcome` against the `__own__:" in text
 
 
