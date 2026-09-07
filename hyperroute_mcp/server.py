@@ -113,21 +113,40 @@ whole-run miss that no single score captures, call `report_narrative` — also s
 
 THE USER'S OWN TOOLS. When the user tells you they already have a tool — "I have my own web
 search, always use it for research", "we have an internal API for customer lookups", "use my
-Exa MCP for papers" — that is a `declare_my_tool` call, not something to remember in your head.
-Declared once, HyperRoute routes to it BY NAME for that kind of work, in every future session and
-every future task, and tells you so with a `use_own` verdict. Pass the user's own words as the
-`description` and leave `capabilities` empty — HyperRoute maps the words onto its capability
-regions and tells you which it chose; read those back to the user so a wrong guess gets corrected
-(`update_my_tool`) rather than silently mis-routing. Do not declare a tool the user merely
-mentioned, and never declare one on your own initiative: this is their statement about their own
-stack, not your inference.
+ivanspersonalVPN whenever I need a VPN connect" — that is a `declare_my_tool` call, not something
+to remember in your head. Declared once, HyperRoute routes to it BY NAME whenever their rule
+fires, in every future session and every future task, and tells you so with a `use_own` verdict.
 
-Two properties to convey when it comes up. It is SCOPED — outside the declared region their tool
-is not in the ranking at all, so declaring one never blinds HyperRoute everywhere else. And it is
-UNSCORED — HyperRoute routes there because they said so; it has no measurement of their tool and
-will not pretend to. `my_tool_report` later shows them their OWN outcome record per region beside
-whether HyperRoute holds tested alternatives; relay it as their record, never as a verdict that
-their tool is worse.
+What you pass is `triggers`: THEIR SENTENCE, VERBATIM. "for invoices go through my Xero thing".
+"mp3s over two minutes go to Olena's transcriber". "use it whenever I need to do a VPN connect".
+Keep their words and their language, keep every condition, and do not rewrite it into a category —
+the sentence itself is read against each incoming request, so anything you smooth away is a
+condition HyperRoute can no longer honour. If they named a tool but never said when to use it,
+ASK for that sentence; it is the one field nothing else can substitute for. `description` and
+`capabilities` are optional colour for their own report and route nothing. Do not declare a tool
+the user merely mentioned, and never declare one on your own initiative: this is their statement
+about their own stack, not your inference.
+
+PASS THE SITUATION. Their rules are about circumstances the query often does not carry — a file's
+size or duration, the time, the language of a document, what they said about their mood or
+deadline. Put whatever you know in `context.situation` on `recommend`, as one plain line of prose
+("user attached a 4-minute mp3; said they're in a rush"). No schema, no fields, empty is fine.
+Without it a conditional rule cannot be decided.
+
+ANSWER `consider`. A ranking may come back with a `consider:` block: a rule of theirs that could
+not be decided, quoted, with the missing fact named ("whether the user is in a bad mood"). Answer
+it from what you already know by adding that fact to `context.situation` and calling `recommend`
+again; ask the user only if you genuinely cannot tell. If several of their rules fire at once they
+all arrive there and the choice is YOURS to make — you hold the situation, HyperRoute does not.
+A `consider:` line reading `no_trigger` means they declared a tool with no sentence attached, so
+it can never fire: tell them, and fix it with `update_my_tool(triggers=[…])`.
+
+Two properties to convey when it comes up. It is CONDITIONAL — when no rule of theirs fires the
+tool is not in the ranking at all, so declaring one never blinds HyperRoute everywhere else. And
+it is UNSCORED — HyperRoute routes there because they said so; it has no measurement of their tool
+and will not pretend to. `my_tool_report` later shows them their OWN outcome record beside whether
+HyperRoute holds tested alternatives; relay it as their record, never as a verdict that their tool
+is worse.
 
 THE USER'S PREFERRED TOOLS. When the user says they LIKE a tool HyperRoute already has — "I like
 Kagi, use it whenever it's even remotely acceptable", "prefer Perplexity for research" — that is a
@@ -377,6 +396,13 @@ async def recommend(query: str, facets: dict | None = None, context: dict | None
     Deliberately shallow: descriptions, per-plan pricing, facet breakdowns and probe evidence are
     NOT included. Pull them for the one tool that matters with `describe(tool_id, sections)`.
 
+    SITUATION: pass `context={"situation": "..."}` — one plain line about whatever you know that
+    the query itself does not say (a file's size or duration, the time, a language, what the user
+    said about their deadline or mood). The user's own declared tools carry rules written in their
+    words, and this is what those rules are read against; without it a conditional rule cannot be
+    decided. Free text, no schema, empty is fine. If the answer carries a `consider:` block, it is
+    naming the fact it is missing — add that fact to `situation` and call again.
+
     FACETS (personalize the ranking — the two-pass flow): the `refine:` line names the unset facets
     that would reorder THESE candidates, and `status: needs_facets` means one of them could flip
     the pick, so it's provisional. Fill the relevant ones from your read of the user's need — or
@@ -602,11 +628,23 @@ async def console(view: str = "home") -> dict:
 _STANCES = ("pinned", "benchmarked")
 
 
+def _as_triggers(triggers) -> list[str]:
+    """The user's own sentences, kept verbatim and never reshaped — only emptied of blanks.
+
+    A single string is wrapped rather than iterated: an LLM asked for a list of sentences often
+    sends one sentence, and splitting that into characters would store a tool nothing can ever
+    read."""
+    if isinstance(triggers, str):
+        triggers = [triggers]
+    return [str(t).strip() for t in (triggers or []) if str(t or "").strip()]
+
+
 @mcp.tool()
 async def my_tools() -> dict:
-    """List the tools the USER has declared as their own (`__own__:…` ids), with the capability
-    regions each one covers and its stance. Call this when the user asks what HyperRoute knows
-    they have, or before updating/removing one so you use the right id."""
+    """List the tools the USER has declared as their own (`__own__:…` ids), each with its
+    triggers verbatim — the sentences saying when it should be used — and its stance. Call this
+    when the user asks what HyperRoute knows they have, or before updating/removing one so you use
+    the right id."""
     if (err := _require_login()):
         return err
     return await _authed(_client().list_private_tools())
@@ -614,81 +652,85 @@ async def my_tools() -> dict:
 
 @mcp.tool()
 async def suggest_my_tool_regions(description: str, name: str = "my tool") -> dict:
-    """Preview which named capabilities a description maps onto, WITHOUT declaring anything.
+    """Preview which named capabilities a description maps onto. OPTIONAL, and it decides NOTHING.
 
-    Use this when the user's description is vague and you want to confirm the region with them
-    before committing. `declare_my_tool` already does this for you, so calling it first is
-    optional — do not call both for the same tool unless the user asked to review the regions."""
+    These regions are wording for the user's own outcome report (`my_tool_report`) — "strong on
+    paper search, weak on realtime web". They are NOT how a declared tool gets routed to: that is
+    the trigger sentence you pass to `declare_my_tool`. Do not call this before declaring, and
+    never let a poor match here stop you from declaring — a tool whose description maps onto
+    nothing at all still routes perfectly well off its trigger."""
     if (err := _require_login()):
         return err
     return await _authed(_client().suggest_private_regions(name, description))
 
 
 @mcp.tool()
-async def declare_my_tool(name: str, description: str,
+async def declare_my_tool(name: str, triggers: list[str], description: str = "",
                           capabilities: list[str] | None = None,
                           stance: str = "pinned", project_id: str | None = None) -> dict:
-    """Declare a tool the USER already has, so HyperRoute routes to it by name for the kind of
-    work they describe. Call this when the user says something like "I have my own web search,
-    always use it for research" or "we have an internal API for X".
+    """Declare a tool the USER already has, so HyperRoute routes to it by name when they said to.
+    Call this when the user says something like "I have my own web search, always use it for
+    research", "we have an internal API for X", or "use my VPN tool whenever I need to connect".
 
-    `description` is what the tool is FOR, in the user's own words — it is mapped onto named
-    capability regions, and **you may leave `capabilities` empty and let that mapping pick them**.
-    The regions it chose come back in the answer: read them out to the user, and if they are wrong,
-    call `update_my_tool` with explicit `capabilities` from `suggest_my_tool_regions`.
+    `triggers` is the whole thing, and it is REQUIRED: the sentences saying WHEN to use the tool,
+    kept verbatim in the user's own words and language. Pass what they actually said — "for
+    invoices go through my Xero thing", "mp3s over two minutes go to Olena's transcriber", "use it
+    whenever I need to do a VPN connect". Do not tidy it into a category, do not translate it, and
+    do not drop a condition ("only if the file is in Japanese" is part of the trigger). That
+    sentence is read against every incoming request, together with whatever you pass in
+    `context.situation` on `recommend`, and it is what decides whether their tool wins. A tool may
+    carry several triggers; pass them all.
 
-    `stance` — "pinned" (default) means their tool always wins inside its region; "benchmarked"
+    `description` is optional free text about what the tool is. `capabilities` is optional too —
+    named regions used only to word the user's own outcome report, never to route. Leave both
+    empty unless the user gave you something to put there; a declaration with a trigger and
+    nothing else is complete.
+
+    `stance` — "pinned" (default) means their tool wins whenever a trigger fires; "benchmarked"
     lets a catalog tool displace it once the user's own reported outcomes show it underperforming.
     Start pinned; that is what the user asked for.
 
-    OUTSIDE the declared region the tool is simply not in the ranking, so a declaration is never a
+    When NO trigger fires the tool is simply not in the ranking, so a declaration is never a
     blanket override. Nothing here is scored — HyperRoute has never tested their tool and never
     claims to have."""
     if (err := _require_login()):
         return err
     if stance not in _STANCES:
         return {"_error": True, "message": f"stance must be one of {_STANCES}"}
-    picked = list(capabilities or [])
-    suggested = None
-    if not picked:
-        # Map the user's own words onto named capabilities so the agent never has to know anchor
-        # ids. Only in-taxonomy suggestions are auto-accepted; a description that maps nowhere is
-        # reported back rather than declared against a region nobody meant.
-        suggested = await _authed(_client().suggest_private_regions(name, description))
-        if isinstance(suggested, dict) and suggested.get("_error"):
-            return suggested
-        # Every in-taxonomy candidate, not the top few. A region is usually several things
-        # ("browse, scrape, query and read websites" is four verbs), and truncating drops the ones
-        # a skewed ranking put lower — which is how a crawler skill lost `web_scraping_structured`
-        # and then missed "read this website". The router applies its own cap.
-        picked = [s["id"] for s in (suggested or {}).get("suggestions", [])
-                  if s.get("in_taxonomy")]
-        if not picked:
-            return {"_error": True, "message":
-                    "could not map that description onto any capability HyperRoute models — ask "
-                    "the user what kind of task the tool is for, in more concrete terms, or pass "
-                    "`capabilities` explicitly from `suggest_my_tool_regions`",
-                    "suggestions": (suggested or {}).get("suggestions", [])}
+    # A model handed a list-typed field frequently sends the bare sentence instead. Iterating that
+    # string yields characters and would declare a tool with 40 one-letter triggers, so coerce.
+    kept = _as_triggers(triggers)
+    if not kept:
+        # The router refuses a triggerless declaration (422 no_trigger) and it is right to: a tool
+        # with nothing to read can never fire. Say so here, in terms of the field that is missing,
+        # rather than letting the agent reword `description` at a wall it cannot see.
+        return {"_error": True, "message":
+                "declare_my_tool needs `triggers`: the user's own sentence saying WHEN to use "
+                "this tool, e.g. [\"use it whenever I need to do a VPN connect\"]. Ask them for "
+                "that sentence if they have not said it yet — nothing else can stand in for it."}
     out = await _authed(_client().declare_private_tool(
-        {"name": name, "description": description, "anchors": picked,
-         "stance": stance, "project_id": project_id}))
+        {"name": name, "description": description, "triggers": kept,
+         "anchors": list(capabilities or []), "stance": stance, "project_id": project_id}))
     if isinstance(out, dict) and not out.get("_error"):
         out["_coordinator_action"] = (
-            "Tell the user which capability regions this covers (the `regions` labels) and that "
-            "their tool now wins for those and only those. If the regions are wrong, fix them "
-            "with update_my_tool(capabilities=[…]).")
-        if capabilities is None:
-            out["_regions_were_inferred"] = True
+            "Read the stored triggers back to the user in their own words and say their tool now "
+            "wins whenever one of those fires, and only then. If a trigger is wrong or missing a "
+            "condition, fix it with update_my_tool(triggers=[…]).")
     return out
 
 
 @mcp.tool()
 async def update_my_tool(tool_id: str, name: str | None = None,
                          description: str | None = None,
+                         triggers: list[str] | None = None,
                          capabilities: list[str] | None = None,
                          stance: str | None = None) -> dict:
-    """Edit one declared tool in place — rename it, reword what it is for, change which
-    capabilities it covers, or flip its stance. Only the fields you pass are changed.
+    """Edit one declared tool in place — rename it, rewrite when it should fire, or flip its
+    stance. Only the fields you pass are changed.
+
+    `triggers` REPLACES the whole trigger list, so send every sentence the tool should keep, not
+    just the new one. This is how a user adds a condition ("actually, only for work files") or
+    corrects a trigger you recorded wrong. A tool must keep at least one.
 
     Use this rather than re-declaring: the tool keeps its id and therefore its accumulated outcome
     record, whereas declaring again under a new name creates a SECOND tool and orphans the first."""
@@ -696,7 +738,13 @@ async def update_my_tool(tool_id: str, name: str | None = None,
         return err
     if stance is not None and stance not in _STANCES:
         return {"_error": True, "message": f"stance must be one of {_STANCES}"}
-    body = {"name": name, "description": description,
+    if triggers is not None:
+        triggers = _as_triggers(triggers)
+        if not triggers:
+            return {"_error": True, "message":
+                    "a tool must keep at least one trigger — the sentence saying when to use it. "
+                    "Remove the tool with remove_my_tool if it no longer applies."}
+    body = {"name": name, "description": description, "triggers": triggers,
             "anchors": capabilities, "stance": stance}
     return await _authed(_client().update_private_tool(
         tool_id, {k: v for k, v in body.items() if v is not None}))
