@@ -4,6 +4,7 @@ the hosted router, a self-hosted one, or a local dev instance with no code chang
   HYPERROUTE_BASE_URL      base URL of the router (default https://hyperroute.io)
   HYPERROUTE_API_KEY       optional hyr_… personal access token to start already logged in
   HYPERROUTE_TIMEOUT       per-request timeout in seconds (default 30)
+  HYPERROUTE_EXECUTE_TIMEOUT  execute timeout in seconds (default 1200)
   HYPERROUTE_TOKEN_FILE    where the login token is cached (default ~/.hyperroute/token.json)
 
   HYPERROUTE_COORDINATOR   which coordinator this server runs inside — "claude_code", "codex",
@@ -21,6 +22,7 @@ import os
 
 DEFAULT_BASE_URL = "https://hyperroute.io"
 DEFAULT_TIMEOUT = 30.0
+DEFAULT_EXECUTE_TIMEOUT = 1200.0
 
 
 def base_url() -> str:
@@ -36,6 +38,13 @@ def timeout() -> float:
         return float(os.environ.get("HYPERROUTE_TIMEOUT", DEFAULT_TIMEOUT))
     except ValueError:
         return DEFAULT_TIMEOUT
+
+
+def execute_timeout() -> float:
+    try:
+        return float(os.environ.get("HYPERROUTE_EXECUTE_TIMEOUT", DEFAULT_EXECUTE_TIMEOUT))
+    except ValueError:
+        return DEFAULT_EXECUTE_TIMEOUT
 
 
 def _csv(name: str) -> list[str]:

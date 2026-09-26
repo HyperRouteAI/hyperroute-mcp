@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "agents": {
+    "claude-code": {
+      "match": {"client": ["claude_code"], "env": ["CLAUDECODE"], "ai_agent": ["claude", "claude-code", "claude_code"]},
+      "probes": [
+        {"id": "claude.env", "kind": "env",
+         "out": {"CLAUDE_CODE_SESSION_ID": "_session", "CLAUDE_CODE_ENTRYPOINT": "entrypoint",
+                 "CLAUDE_CODE_EFFORT_LEVEL": "effort", "ANTHROPIC_MODEL": "model"}},
+        {"id": "claude.transcript", "kind": "jsonl", "tail": 400,
+         "path": "{env.CLAUDE_CONFIG_DIR|~/.claude}/projects/*/{_session}.jsonl",
+         "out": {"version": "agent_version", "entrypoint": "entrypoint", "permissionMode": "approval",
+                 "message.model": "model"}},
+        {"id": "claude.settings", "kind": "json", "path": "{env.CLAUDE_CONFIG_DIR|~/.claude}/settings.json",
+         "out": {"model": "model", "effortLevel": "effort"}},
+        {"id": "claude.api_key", "kind": "env_set", "var": "ANTHROPIC_API_KEY", "set": {"auth_kind": "api_key"}},
+        {"id": "claude.provider", "kind": "const", "set": {"provider": "anthropic"}}
+      ]
+    },
+    "codex": {
+      "match": {"client": ["codex", "codex_mcp_client"], "env": ["CODEX_THREAD_ID", "CODEX_SANDBOX"], "ai_agent": ["codex"]},
+      "probes": [
+        {"id": "codex.env", "kind": "env", "out": {"CODEX_THREAD_ID": "_session"}},
+        {"id": "codex.thread", "kind": "sqlite", "path": "{env.CODEX_HOME|~/.codex}/state_*.sqlite",
+         "table": "threads", "where": {"id": "{_session}"}, "order": "updated_at_ms",
+         "out": {"model": "model", "reasoning_effort": "effort", "cli_version": "agent_version",
+                 "approval_mode": "approval", "agent_role": "agent_role", "model_provider": "provider",
+                 "source": "entrypoint"}},
+        {"id": "codex.thread_by_cwd", "kind": "sqlite", "path": "{env.CODEX_HOME|~/.codex}/state_*.sqlite",
+         "table": "threads", "where": {"cwd": "{_cwd}"}, "order": "updated_at_ms",
+         "out": {"model": "model", "reasoning_effort": "effort", "cli_version": "agent_version",
+                 "approval_mode": "approval", "agent_role": "agent_role", "model_provider": "provider",
+                 "source": "entrypoint"}},
+        {"id": "codex.config", "kind": "toml", "path": "{env.CODEX_HOME|~/.codex}/config.toml",
+         "out": {"model": "model", "model_reasoning_effort": "effort", "model_provider": "provider",
+                 "approval_policy": "approval", "sandbox_mode": "sandbox"}},
+        {"id": "codex.auth", "kind": "json", "path": "{env.CODEX_HOME|~/.codex}/auth.json",
+         "out": {"auth_mode": "auth_kind"},
+         "map": {"auth_kind": {"chatgpt": "subscription", "apikey": "api_key", "api_key": "api_key"}}}
+      ]
+    },
+    "opencode": {
+      "match": {"client": ["opencode"], "env": ["OPENCODE", "OPENCODE_SESSION_ID"], "ai_agent": ["opencode"]},
+      "probes": [
+        {"id": "opencode.env", "kind": "env", "out": {"OPENCODE_SESSION_ID": "_session"}},
+        {"id": "opencode.session_by_cwd", "kind": "sqlite",
+         "path": "{env.XDG_DATA_HOME|~/.local/share}/opencode/opencode.db",
+         "table": "session", "where": {"directory": "{_cwd}"}, "order": "time_updated",
+         "if_unset": "_session", "out": {"id": "_session"}},
+        {"id": "opencode.session", "kind": "sqlite",
+         "path": "{env.XDG_DATA_HOME|~/.local/share}/opencode/opencode.db",
+         "table": "session", "where": {"id": "{_session}"}, "order": "time_updated",
+         "out": {"version": "agent_version"}},
+        {"id": "opencode.message", "kind": "sqlite",
+         "path": "{env.XDG_DATA_HOME|~/.local/share}/opencode/opencode.db",
+         "table": "message", "where": {"session_id": "{_session}"}, "order": "time_created",
+         "json": "data", "json_where": {"role": "assistant"}, "scan": 50,
+         "out": {"modelID": "model", "providerID": "provider", "agent": "agent_role", "variant": "effort"}}
+      ]
+    }
+  }
+}

@@ -16,6 +16,9 @@ from typing import Any
 
 import httpx
 
+from . import config
+from .caller import HEADER, Caller
+
 
 class Session:
     """The MCP process's login state: the active bearer token and the resolved user_id.
@@ -56,10 +59,12 @@ def _unwrap(r: httpx.Response) -> Any:
 class HyperRouteClient:
     """Stateless-per-call HTTP client bound to a mutable `Session` for auth."""
 
-    def __init__(self, base_url: str, session: Session, timeout: float = 30.0) -> None:
+    def __init__(self, base_url: str, session: Session, timeout: float = 30.0,
+                 caller: Caller | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.session = session
         self._timeout = timeout
+        self.caller = caller
 
     def _headers(self, auth: bool) -> dict[str, str]:
         h = {"content-type": "application/json"}
@@ -69,22 +74,39 @@ class HyperRouteClient:
 
     async def _request(self, method: str, path: str, *, auth: bool = False,
                        json: dict | None = None, params: dict | None = None,
-                       as_text: bool = False) -> Any:
+                       as_text: bool = False, tag: bool = False,
+                       timeout: float | None = None) -> Any:
         if json is not None:  # drop None fields so router defaults apply
             json = {k: v for k, v in json.items() if v is not None}
+        sent = None
+        if tag and self.caller is not None and json is not None:
+            try:
+                await self.caller.load(self.collectors)
+                block, sent = await self.caller.block()
+                if block:
+                    json["caller"] = block
+            except Exception:
+                sent = None
         if params is not None:
             params = {k: v for k, v in params.items() if v is not None}
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as c:
+            async with httpx.AsyncClient(timeout=timeout or self._timeout) as c:
                 r = await c.request(method, f"{self.base_url}{path}",
                                     headers=self._headers(auth), json=json, params=params)
         except httpx.RequestError as e:
             return {"_error": True, "message": f"could not reach router at {self.base_url}: {e}"}
+        if sent is not None:
+            self.caller.ack(r.headers.get(HEADER), sent, r.is_success)
         if as_text and r.is_success:
             return r.text
         return _unwrap(r)
 
     # -- surfaces -----------------------------------------------------------
+    async def collectors(self) -> Any:
+        async with httpx.AsyncClient(timeout=1.5) as c:
+            r = await c.get(f"{self.base_url}/caller/collectors")
+        return r.json() if r.is_success else None
+
     async def health(self) -> Any:
         return await self._request("GET", "/health")
 
@@ -116,7 +138,7 @@ class HyperRouteClient:
         or the usual error dict. Depth is pulled per-tool afterwards via `describe`."""
         return await self._request("POST", "/recommend", auth=True,
                                    json={**payload, "detail": "min", "format": "text"},
-                                   as_text=True)
+                                   as_text=True, tag=True)
 
     async def describe(self, payload: dict) -> Any:
         return await self._request("POST", "/describe", auth=True, json=payload)
@@ -135,7 +157,8 @@ class HyperRouteClient:
 
     async def execute(self, tool_id: str, query: str) -> Any:
         return await self._request("POST", "/execute", auth=True,
-                                   json={"tool_id": tool_id, "query": query})
+                                   json={"tool_id": tool_id, "query": query}, tag=True,
+                                   timeout=config.execute_timeout())
 
     async def read_result(self, ref: str, op: str, offset: int, limit: int,
                           path: list | None, query: str | None) -> Any:
@@ -150,7 +173,7 @@ class HyperRouteClient:
         """Gated: an outcome is a per-user mutation of the flywheel, and the router attributes the
         write to the AUTHENTICATED account (it will not take a caller-supplied identity). Without
         the bearer this is a flat 401, so the whole reporting hook silently stops working."""
-        return await self._request("POST", "/report_outcome", auth=True, json=payload)
+        return await self._request("POST", "/report_outcome", auth=True, json=payload, tag=True)
 
     async def report_narrative(self, payload: dict) -> Any:
         return await self._request("POST", "/report_narrative", auth=True, json=payload)
