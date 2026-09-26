@@ -128,17 +128,16 @@ ASK for that sentence; it is the one field nothing else can substitute for. `des
 the user merely mentioned, and never declare one on your own initiative: this is their statement
 about their own stack, not your inference.
 
-PASS THE SITUATION. Their rules are about circumstances the query often does not carry — a file's
-size or duration, the time, the language of a document, what they said about their mood or
-deadline. Put whatever you know in `context.situation` on `recommend`, as one plain line of prose
-("user attached a 4-minute mp3; said they're in a rush"). No schema, no fields, empty is fine.
-Without it a conditional rule cannot be decided.
+PUT THE FACTS IN THE QUERY. Their rules are often about circumstances — a file's size or
+duration, the time, the language of a document, what they said about their mood or deadline. The
+query is the only thing their rules are read against, so write those facts into the query itself
+("transcribe this 4-minute mp3, I'm in a rush").
 
 ANSWER `consider`. A ranking may come back with a `consider:` block: a rule of theirs that could
 not be decided, quoted, with the missing fact named ("whether the user is in a bad mood"). Answer
-it from what you already know by adding that fact to `context.situation` and calling `recommend`
-again; ask the user only if you genuinely cannot tell. If several of their rules fire at once they
-all arrive there and the choice is YOURS to make — you hold the situation, HyperRoute does not.
+it from what you already know by adding that fact to the query and calling `recommend` again; ask
+the user only if you genuinely cannot tell. If several of their rules fire at once they all arrive
+there and the choice is YOURS to make.
 A `consider:` line reading `no_trigger` means they declared a tool with no sentence attached, so
 it can never fire: tell them, and fix it with `update_my_tool(triggers=[…])`.
 
@@ -418,12 +417,11 @@ async def recommend(query: str, facets: dict | None = None, context: dict | None
     Deliberately shallow: descriptions, per-plan pricing, facet breakdowns and probe evidence are
     NOT included. Pull them for the one tool that matters with `describe(tool_id, sections)`.
 
-    SITUATION: pass `context={"situation": "..."}` — one plain line about whatever you know that
-    the query itself does not say (a file's size or duration, the time, a language, what the user
-    said about their deadline or mood). The user's own declared tools carry rules written in their
-    words, and this is what those rules are read against; without it a conditional rule cannot be
-    decided. Free text, no schema, empty is fine. If the answer carries a `consider:` block, it is
-    naming the fact it is missing — add that fact to `situation` and call again.
+    FACTS GO IN THE QUERY: the user's own declared tools carry rules written in their words, and
+    the query is the only thing those rules are read against. Write any fact a rule could turn on
+    (a file's size or duration, a language, what the user said about their deadline or mood) into
+    the query. If the answer carries a `consider:` block, it is naming the fact it is missing — add
+    that fact to the query and call again.
 
     FACETS (personalize the ranking — the two-pass flow): the `refine:` line names the unset facets
     that would reorder THESE candidates, and `status: needs_facets` means one of them could flip
@@ -702,8 +700,8 @@ async def declare_my_tool(name: str, triggers: list[str], description: str = "",
     invoices go through my Xero thing", "mp3s over two minutes go to Olena's transcriber", "use it
     whenever I need to do a VPN connect". Do not tidy it into a category, do not translate it, and
     do not drop a condition ("only if the file is in Japanese" is part of the trigger). That
-    sentence is read against every incoming request, together with whatever you pass in
-    `context.situation` on `recommend`, and it is what decides whether their tool wins. A tool may
+    sentence is read against every incoming query, and it is what decides whether their tool
+    wins. A tool may
     carry several triggers; pass them all.
 
     `description` is optional free text about what the tool is. `capabilities` is optional too —

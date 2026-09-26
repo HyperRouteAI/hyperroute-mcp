@@ -297,7 +297,7 @@ async def test_instructions_teach_declaring_and_the_own_verdict():
     # the two honesty properties the surface must convey
     assert "CONDITIONAL" in text and "UNSCORED" in text
     # the trigger model, not the retired region model
-    assert "VERBATIM" in text and "context.situation" in text
+    assert "VERBATIM" in text and "context.situation" not in text
     assert "consider" in text
     assert "report_outcome` against the `__own__:" in text
 
