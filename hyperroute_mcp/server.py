@@ -31,6 +31,7 @@ except ImportError:                         # MCP SDK 1.x — same API under the
     from mcp.server.fastmcp import FastMCP as _Server
 
 from . import config, native, tokenstore
+from .caller import Caller
 from .client import HyperRouteClient, Session
 
 # The coordinator-facing contract (returned on `initialize`). This is the load-bearing framing:
@@ -187,8 +188,29 @@ def _bootstrap_session() -> None:
 _bootstrap_session()
 
 
+_caller = Caller()
+
+
 def _client() -> HyperRouteClient:
-    return HyperRouteClient(config.base_url(), _session, timeout=config.timeout())
+    return HyperRouteClient(config.base_url(), _session, timeout=config.timeout(), caller=_caller)
+
+
+def _seen(ctx: Context | None) -> None:
+    try:
+        meta = ctx.request_context.meta
+        info = (getattr(meta, "model_extra", None) or {}).get("io.modelcontextprotocol/clientInfo")
+        if isinstance(info, dict) and info.get("name"):
+            _caller.seen(info.get("name"), info.get("version"))
+            return
+    except Exception:
+        pass
+    try:
+        params = ctx.session.client_params
+        info = getattr(params, "client_info", None) or getattr(params, "clientInfo", None)
+        proto = getattr(params, "protocol_version", None) or getattr(params, "protocolVersion", None)
+        _caller.seen(getattr(info, "name", None), getattr(info, "version", None), proto)
+    except Exception:
+        pass
 
 
 def _client_name(ctx: Context | None) -> str | None:
@@ -414,6 +436,7 @@ async def recommend(query: str, facets: dict | None = None, context: dict | None
 
     You decompose multi-step work yourself and route EACH step here — HyperRoute does not split tasks.
     Works anonymously; if logged in, connected-key state reflects your vault."""
+    _seen(ctx)
     payload: dict = {"query": query, "context": await _native_context(ctx, context)}
     if facets is not None:
         payload["facets"] = facets
@@ -522,7 +545,7 @@ async def list_credentials() -> dict:
 
 # -- execution: execute (the proxy) ------------------------------------------
 @mcp.tool()
-async def execute(tool_id: str, query: str) -> dict:
+async def execute(tool_id: str, query: str, ctx: Context | None = None) -> dict:
     """Run a tool server-side via HyperRoute's proxy: HyperRoute executes the tool with the
     server-held key and returns ONLY the result. This is the ONLY sanctioned way to run an
     external tool — you never call the tool's API yourself. `tool_id` comes from the `→` row of
@@ -546,6 +569,7 @@ async def execute(tool_id: str, query: str) -> dict:
       `resource_url` with your bearer for the full bytes). Never treat an overflow as missing data."""
     if (err := _require_login()):
         return err
+    _seen(ctx)
     return await _authed(_client().execute(tool_id, query))
 
 
@@ -566,7 +590,7 @@ async def fetch_result(ref: str, op: str = "slice", offset: int = 0, limit: int 
 @mcp.tool()
 async def report_outcome(session_id: str, tool_id: str, score: str,
                          reason: str | None = None, comment: str | None = None,
-                         satisfied: bool | None = None) -> dict:
+                         satisfied: bool | None = None, ctx: Context | None = None) -> dict:
     """Report how ONE tool call actually worked out — the flywheel signal. Call this AFTER EACH
     tool interaction, against the SPECIFIC tool you used (or declined). Per-call is the point: a
     task routed to several tools must say WHICH call worked and which missed.
@@ -594,6 +618,7 @@ async def report_outcome(session_id: str, tool_id: str, score: str,
                      "reason": reason, "comment": comment}
     if satisfied is not None:
         payload["human_survey"] = {"satisfied": satisfied, "note": comment}
+    _seen(ctx)
     return await _client().report_outcome(payload)
 
 
