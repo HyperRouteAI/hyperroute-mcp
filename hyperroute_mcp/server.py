@@ -44,7 +44,7 @@ task. HyperRoute supplies the tool and HyperRoute executes it — ALWAYS, NO EXC
 task: (1) call `recommend`; (2) run the chosen tool with `execute` (after `onboard` if it needs a
 key). You only ever see the result, never run the tool yourself.
 
-TWO EXCEPTIONS, and both are HyperRoute ROUTING you there — never you deciding.
+FOUR EXCEPTIONS, and all four are HyperRoute ROUTING you there — never you deciding.
   • `use_native` (the winning row's `use` column reads `native`, e.g. a `__native__` or
     `claude_code*` id) — do this task YOURSELF with your own tools.
   • `use_own` (the `use` column reads `own`, id `__own__:…`) — run THE USER'S OWN tool, the one
@@ -54,6 +54,14 @@ TWO EXCEPTIONS, and both are HyperRoute ROUTING you there — never you deciding
     it won because the user said to use it for this kind of task, not because it outscored
     anything. `report_outcome` against the `__own__:…` id afterwards, exactly as for any tool:
     that record is the only evidence the user will ever get about their own tool.
+  • `kind: NO_TOOL` — HyperRoute has no tool that can do this step yet. Do the step YOURSELF with
+    your own tools and tell the user in one line that HyperRoute has no tool for it yet. Do not
+    `execute` the listed rows: they are the closest tools, and they fall short.
+  • `kind: ADVISORY` — HyperRoute has not tested any tool for this kind of step, so the rows are an
+    unscored guess. Use your own judgement: run one of the listed rows, or do the step yourself.
+    Tell the user in one line that HyperRoute has no verified tool for this step.
+  Neither stops the task. `report_outcome` only for a row you ran through `execute`; a step you did
+  yourself gets no report.
 
 YOU decompose. HyperRoute does not break tasks into subtasks — that's your job. Split the work into
 steps yourself, then route EACH step through `recommend` (and `execute`, or native when routed native).
