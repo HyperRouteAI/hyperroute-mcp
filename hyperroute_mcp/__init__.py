@@ -6,7 +6,7 @@ end-to-end in one conversation.
 It talks to the router only over its public HTTP API and holds no product logic of its own.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 
 from .server import mcp
 
