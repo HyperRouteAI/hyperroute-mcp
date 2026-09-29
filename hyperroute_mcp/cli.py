@@ -35,6 +35,47 @@ def _launch() -> list[str]:
     return [sys.executable, "-m", "hyperroute_mcp"]
 
 
+_ANCESTORS = (("claude", "claude_code"), ("codex", "codex"), ("opencode", "opencode"))
+
+
+def _process(pid: int) -> tuple[int, str] | None:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\0", b" ").decode(errors="replace")
+        return ppid, cmd
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(["ps", "-o", "ppid=", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=3).stdout.strip()
+        ppid, _, cmd = out.partition(" ")
+        return int(ppid), cmd
+    except Exception:
+        return None
+
+
+def _from_ancestry() -> str | None:
+    pid = os.getppid()
+    for _ in range(12):
+        got = _process(pid)
+        if not got:
+            return None
+        ppid, cmd = got
+        if "/@anthropic-ai/claude-code/" in cmd:
+            return "claude_code"
+        for word in cmd.split()[:2]:
+            base = os.path.basename(word).lower()
+            for name, agent in _ANCESTORS:
+                if base == name or base.startswith(name + "-") or base.startswith(name + "."):
+                    return agent
+        if ppid <= 1:
+            return None
+        pid = ppid
+    return None
+
+
 def _agent(argv: list[str]) -> str | None:
     if "--agent" in argv:
         i = argv.index("--agent")
@@ -42,7 +83,7 @@ def _agent(argv: list[str]) -> str | None:
             return argv[i + 1]
     if os.environ.get("CLAUDECODE") == "1" or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
         return "claude_code"
-    return None
+    return _from_ancestry()
 
 
 def _register_claude() -> str:
@@ -73,10 +114,27 @@ def _claude_install(argv: list[str]) -> int:
     if not registered.startswith("HyperRoute is"):
         print(registered)
     print("HyperRoute is set up for Claude Code and its subagents.")
+    print(_login_line("Claude Code"))
+    return 0
+
+
+def _login_line(agent: str) -> str:
     if hooks.logged_in():
-        print("Restart Claude Code to start using it.")
-    else:
-        print("Restart Claude Code, then paste your login line from hyperroute.io (Connect, step 2).")
+        return f"Restart {agent} to start using it."
+    return f"Restart {agent}, then paste your login line from hyperroute.io (Connect, step 2)."
+
+
+def _other_install(argv: list[str], product: str) -> int:
+    label = agents.LABELS[product]
+    if "--remove" in argv:
+        print(f"HyperRoute is removed from {label}." if agents.unregister(product) else "Nothing to remove.")
+        return 0
+    out = agents.register(product, _launch())
+    if out:
+        print(out)
+        return 1
+    print(f"HyperRoute is added to {label}. It runs when you ask for it; automatic use is Claude Code only for now.")
+    print(_login_line(label))
     return 0
 
 
@@ -84,10 +142,11 @@ def install_command(argv: list[str]) -> int:
     agent = _agent(argv)
     if agent == "claude_code":
         return _claude_install(argv)
+    if agent in agents.LABELS:
+        return _other_install(argv, agent)
     print("HyperRoute could not tell which agent is running this command.")
-    print("Claude Code: rerun as `" + _self("install", "--agent", "claude_code") + "`.")
-    print("Other agents: add an MCP server named hyperroute that runs `"
-          + " ".join(_launch()) + "`, then ask it to run HyperRoute's `setup`.")
+    print("Rerun with --agent claude_code, --agent codex or --agent opencode, or add an MCP server named "
+          "hyperroute that runs `" + " ".join(_launch()) + "`.")
     return 1
 
 
