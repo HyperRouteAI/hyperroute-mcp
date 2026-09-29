@@ -257,11 +257,11 @@ async def _authed(coro):
 def _require_login() -> dict | None:
     if not _session.logged_in:
         return {"_error": True, "message":
-                "Not logged in to HyperRoute, so nothing was routed. Ask the user how they want to log "
-                "in: (1) an emailed code: `login_link(email)`, then `verify_login(email, code)` with the "
-                "code they receive; or (2) a token: they log in at https://hyperroute.io, open Connect, "
-                "copy their hyr_… token, and you call `use_token(token)`. The login is saved and reused "
-                "in every later session."}
+                "Not logged in to HyperRoute, so nothing was routed. Ask the user to log in, one of two "
+                "ways: (1) paste the login line from https://hyperroute.io (Connect, MCP tab, step 2: "
+                "\"Log in to HyperRoute with this token: hyr_…\"), then call `use_token(token)`; or (2) "
+                "give you their email and password for `login` — say plainly that you will see the "
+                "password. The login is saved and reused in every later session."}
     return None
 
 
@@ -507,8 +507,9 @@ async def use_token(api_key: str) -> dict:
     profile. The token is validated via /auth/whoami and then **saved to disk**, so every future
     session reuses it automatically. A bad token is rejected and not kept.
 
-    This is the preferred way to authenticate: the user mints the token on the website, so their
-    password never enters this conversation."""
+    This is the preferred way to authenticate: the user copies a login line from https://hyperroute.io
+    (Connect, MCP tab, step 2: "Log in to HyperRoute with this token: hyr_…"), so their password never
+    enters this conversation."""
     prior = _session.api_key
     _session.api_key = api_key
     prof = await _client().whoami()

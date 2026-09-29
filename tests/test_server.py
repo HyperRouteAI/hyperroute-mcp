@@ -151,7 +151,7 @@ async def test_gated_tools_refuse_when_logged_out(monkeypatch, call):
 async def test_recommend_refuses_when_logged_out(fake, monkeypatch):
     monkeypatch.setattr(server, "_session", Session())
     out = await server.recommend("q")
-    assert out.startswith("STOP") and "login_link" in out and "use_token" in out
+    assert out.startswith("STOP") and "use_token" in out and "`login`" in out and "login_link" not in out
 
 
 async def test_execute_runs_once_logged_in(fake, logged_in):
