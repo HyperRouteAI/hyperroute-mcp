@@ -5,14 +5,10 @@ from hyperroute_mcp.client import Session
 
 from .conftest import FakeClient
 
-TOOLS = {"session_info", "health", "finish_setup", "check_setup", "remove_setup", "recommend",
-         "describe", "execute", "onboard", "connect_info",
-         "report_outcome", "report_narrative", "facets_catalog", "get_preferences",
-         "set_preferences", "list_credentials", "fetch_result", "console", "use_token",
-         "register", "verify", "login", "login_link", "verify_login", "forgot_password",
-         "whoami", "my_tools", "suggest_my_tool_regions", "declare_my_tool", "update_my_tool",
-         "remove_my_tool", "my_tool_report", "my_preferred_tools", "prefer_tool",
-         "update_preferred_tool", "unprefer_tool"}
+TOOLS = {"session_info", "setup", "use_token", "login", "recommend", "describe", "execute", "onboard",
+         "connect_info", "report_outcome", "report_narrative", "get_preferences", "set_preferences",
+         "fetch_result", "console", "my_tools", "declare_my_tool", "update_my_tool", "remove_my_tool",
+         "my_preferred_tools", "prefer_tool", "unprefer_tool"}
 
 
 @pytest.fixture
@@ -133,13 +129,10 @@ async def test_describe_forwards_the_route_relative_query(fake):
     lambda: server.execute("brave_search", "q"),
     lambda: server.onboard("brave_search", "k"),
     lambda: server.connect_info("brave_search"),
-    lambda: server.list_credentials(),
-    lambda: server.whoami(),
     lambda: server.get_preferences(),
     lambda: server.set_preferences({}),
     lambda: server.fetch_result("ref"),
     lambda: server.my_tools(),
-    lambda: server.my_tool_report(),
     lambda: server.report_outcome("s-1", "brave_search", "full"),
 ])
 async def test_gated_tools_refuse_when_logged_out(monkeypatch, call):
@@ -172,6 +165,7 @@ async def test_a_401_forgets_the_cached_token(monkeypatch):
 
 async def test_session_info_surfaces_the_declared_baseline(fake, logged_in):
     info = await server.session_info()
+    assert info["router"] == "ok" and info["account"]["email"] == "a@x.io"
     assert info["logged_in"] is True
     assert info["api_key"] == "hyr_test"
     assert info["mcp_client"] == "claude-code"
@@ -204,8 +198,7 @@ def test_token_cache_is_private():
 
 async def test_private_tool_verbs_require_login(fake, monkeypatch):
     monkeypatch.setattr(server, "_session", Session())
-    for call in (server.my_tools(), server.my_tool_report(),
-                 server.suggest_my_tool_regions("x"),
+    for call in (server.my_tools(),
                  server.declare_my_tool("x", ["y"]),
                  server.update_my_tool("__own__:x", name="z"),
                  server.remove_my_tool("__own__:x")):
@@ -285,9 +278,9 @@ async def test_remove_and_list(fake, logged_in):
     assert fake.last("list_private_tools") == {"project_id": None}
 
 
-async def test_report_reads_the_own_console_view(fake, logged_in):
-    await server.my_tool_report()
-    assert fake.last("console")["view"] == "own"
+async def test_my_tools_carries_the_own_report(fake, logged_in):
+    out = await server.my_tools()
+    assert fake.last("console")["view"] == "own" and "report" in out
 
 
 async def test_instructions_teach_declaring_and_the_own_verdict():
@@ -303,7 +296,6 @@ async def test_instructions_teach_declaring_and_the_own_verdict():
 async def test_preferred_tool_verbs_require_login(fake, monkeypatch):
     monkeypatch.setattr(server, "_session", Session())
     for call in (server.my_preferred_tools(), server.prefer_tool("kagi"),
-                 server.update_preferred_tool("kagi_search", margin=0.2),
                  server.unprefer_tool("kagi_search")):
         assert (await call)["_error"] is True
     assert fake.calls == [], "a logged-out verb must not hit the router at all"
@@ -327,11 +319,6 @@ async def test_an_ambiguous_name_is_handed_back_to_ask_not_guessed(logged_in, mo
     assert "Ask the user" in out["_coordinator_action"]
 
 
-async def test_update_sends_only_the_preference_fields_given(fake, logged_in):
-    await server.update_preferred_tool("kagi_search", margin=0.25)
-    assert fake.last("update_preferred_tool") == {"tool_id": "kagi_search", "margin": 0.25}
-
-
 async def test_unprefer_and_list(fake, logged_in):
     assert (await server.unprefer_tool("kagi_search"))["deleted"] is True
     await server.my_preferred_tools()
@@ -343,3 +330,16 @@ async def test_instructions_teach_preferring_and_the_passed_over_line():
     assert "prefer_tool" in text and "Never prefer a tool on your own initiative" in text
     assert "passed over" in text and "MARGIN" in text
 
+
+
+async def test_setup_plans_then_removes(fake, logged_in, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("HYPERROUTE_HOME", str(tmp_path / "hr"))
+    monkeypatch.setattr(server, "_product", lambda ctx: "claude_code")
+    plan = await server.setup()
+    assert plan["changes"] == 3 and "apply=true" in plan["next"]
+    done = await server.setup(apply=True, confirmed=True)
+    assert done["applied"] is True and done["approved_by"] == "chat"
+    assert (await server.setup(remove=True))["would_remove"]
+    assert sorted((await server.setup(remove=True, apply=True))["removed"]) == [
+        "session-start", "subagent-start", "web-guard"]

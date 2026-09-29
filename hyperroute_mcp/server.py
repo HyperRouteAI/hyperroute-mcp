@@ -97,8 +97,8 @@ kinds matter to you:
     server then applies them to EVERY future `recommend` automatically, so you never re-send them.
     When you learn a durable preference ("always needs GDPR-compliant tools", "this project is
     cost-sensitive"), do two things: call `set_preferences`, AND record it in your own project/user
-    memory (CLAUDE.md) so you know it's set. Call `facets_catalog` once to see the full facet list,
-    the defaults, and which facets are constraints worth persisting.
+    memory (CLAUDE.md) so you know it's set. `get_preferences` also lists every facet, the
+    defaults, and which facets are constraints worth persisting.
 
 REPORT AFTER EACH TOOL CALL — SILENTLY. After every tool interaction, call `report_outcome(
 session_id, tool_id, score, …)` for that SPECIFIC call. This is background telemetry: do it QUIETLY —
@@ -140,7 +140,7 @@ it can never fire: tell them, and fix it with `update_my_tool(triggers=[…])`.
 Two properties to convey when it comes up. It is CONDITIONAL — when no rule of theirs fires the
 tool is not in the ranking at all, so declaring one never blinds HyperRoute everywhere else. And
 it is UNSCORED — HyperRoute routes there because they said so; it has no measurement of their tool
-and will not pretend to. `my_tool_report` later shows them their OWN outcome record beside whether
+and will not pretend to. `my_tools` later shows them their OWN outcome record beside whether
 HyperRoute holds tested alternatives; relay it as their record, never as a verdict that their tool
 is worse.
 
@@ -157,9 +157,9 @@ than their margin, or it was under the capability bar. On a passed-over preferen
 the ranking's pick and tell the user in ONE line that their preferred tool was passed over and by
 how much; never run it anyway — they set the margin. Never prefer a tool on your own initiative.
 
-SETUP. When the user asks to finish, check, upgrade or remove the HyperRoute setup, call
-`finish_setup`, `check_setup` or `remove_setup`. They return a plan first; explain it to the user and
-apply it only when they agree. A `note:` line on a tool result is for the user: pass it on in one line.
+SETUP. When the user asks to set up, finish, check, upgrade or remove HyperRoute, call `setup`. It
+returns a plan first; explain it to the user and apply it only when they agree. A `note:` line on a
+tool result is for the user: pass it on in one line.
 
 LOGIN IS PERSISTENT. Once the user authenticates, the token is saved and reused across sessions.
 Don't ask them to log in again unless a tool reports the token is invalid (401)."""
@@ -250,7 +250,8 @@ async def _authed(coro):
         _forget_session()
         return {"_error": True, "_http_status": 401, "message":
                 "your saved HyperRoute login is no longer valid (token revoked or expired) — "
-                "re-authenticate with `login`, `use_token`, or `register` + `verify`"}
+                "re-authenticate: ask for a new login line from hyperroute.io (Connect, step 2) and call "
+                "`use_token`, or `login` with email and password"}
     return out
 
 
@@ -277,27 +278,28 @@ def _as_text(out) -> str:
 
 @mcp.tool()
 async def session_info(ctx: Context | None = None) -> dict:
-    """Show this MCP session's connection state: the HyperRoute base URL, whether a user is
-    already logged in (login is restored from disk across sessions), the account email/user_id,
-    the masked token, and which coordinator this server declares itself to be. Call this first —
-    if `logged_in` is true you can go straight to `recommend`/`execute`; the user does NOT need to
-    log in again. `native_tools` is the coordinator HyperRoute compares external tools against."""
+    """Show the connection: whether the router is up, whether a user is logged in (login is
+    restored from disk across sessions) and their account, the masked token, the MCP version, and
+    which coordinator this server declares itself to be. If `logged_in` is true go straight to
+    `recommend`/`execute`; the user does NOT need to log in again. `native_tools` is the coordinator
+    HyperRoute compares external tools against."""
     key = _session.api_key
     masked = f"{key[:8]}…{key[-4:]}" if key and len(key) > 12 else key
     declared = await native.declared_context(_client(), _client_name(ctx))
-    return {"base_url": config.base_url(), "logged_in": _session.logged_in,
-            "user_id": _session.user_id, "email": _session.email, "api_key": masked,
-            "token_source": "env" if _session.env_managed else "cache",
-            "mcp_client": _client_name(ctx),
-            "native_tools": declared.get("native_tools", []),
-            "held_plans": (declared.get("entitlements") or {}).get("held", []),
-            "versions": await asyncio.to_thread(install.status)}
-
-
-@mcp.tool()
-async def health() -> dict:
-    """Check that the router is up and can route. No login required."""
-    return await _client().health()
+    health = await _client().health()
+    out = {"router": "unreachable" if isinstance(health, dict) and health.get("_error") else "ok",
+           "base_url": config.base_url(), "logged_in": _session.logged_in,
+           "user_id": _session.user_id, "email": _session.email, "api_key": masked,
+           "token_source": "env" if _session.env_managed else "cache",
+           "mcp_client": _client_name(ctx),
+           "native_tools": declared.get("native_tools", []),
+           "held_plans": (declared.get("entitlements") or {}).get("held", []),
+           "versions": await asyncio.to_thread(install.status)}
+    if _session.logged_in:
+        profile = await _authed(_client().whoami())
+        if isinstance(profile, dict) and not profile.get("_error"):
+            out["account"] = {k: profile.get(k) for k in ("email", "display_name", "tier", "status")}
+    return out
 
 
 class _Approve(BaseModel):
@@ -354,21 +356,21 @@ async def _notices(ctx: Context | None) -> list[str]:
         if st.get("unsupported") and "unsupported" not in _told:
             _told.add("unsupported")
             out.append(f"hyperroute-mcp {st['running']} is below the supported minimum "
-                       f"{st.get('minimum')}: tell the user and call `check_setup`.")
+                       f"{st.get('minimum')}: tell the user and call `setup`.")
         elif st.get("upgrade_available") and "upgrade" not in _told:
             _told.add("upgrade")
             out.append(f"hyperroute-mcp {st['latest']} is available (running {st['running']}): "
-                       f"tell the user; `check_setup` can upgrade.")
+                       f"tell the user; `setup(upgrade=true)` can upgrade.")
         product = _product(ctx)
         if agents.supported(product) and "setup" not in _told:
             entry = install.load_record()["agents"].get(product)
             if not entry:
                 _told.add("setup")
                 out.append("HyperRoute setup is not finished for this agent: tell the user, and call "
-                           "`finish_setup` if they want HyperRoute used automatically.")
+                           "`setup` if they want HyperRoute used automatically.")
             elif agents.OPTIONS[product]["new_pieces"]():
                 _told.add("setup")
-                out.append("HyperRoute has new setup options for this agent: `check_setup` lists them.")
+                out.append("HyperRoute has new setup options for this agent: `setup` lists them.")
     except Exception:
         pass
     return out
@@ -391,8 +393,7 @@ def _needs_confirmation(tool: str, extra: str = "") -> str:
             f"`{tool}` again with confirmed=true{extra}.")
 
 
-async def _setup(ctx: Context | None, apply: bool, block_web: bool, first: bool,
-                 confirmed: bool = False) -> dict:
+async def _setup(ctx: Context | None, apply: bool, block_web: bool, confirmed: bool = False) -> dict:
     product = _product(ctx)
     health = await _setup_health()
     out: dict = {"agent": product or _client_name(ctx) or "unknown", "health": health}
@@ -410,10 +411,11 @@ async def _setup(ctx: Context | None, apply: bool, block_web: bool, first: bool,
         out["changes"] = len(pending)
         out["next"] = ("Nothing to change." if not pending else
                        "Explain this plan to the user in plain words. Only if they agree, call "
-                       f"`{'finish_setup' if first else 'check_setup'}` again with apply=true"
+                       "`setup` again with apply=true"
                        + (" and block_web=true." if block_web else "."))
         if not health["logged_in"]:
-            out["login"] = "Not logged in: after setup, offer `login_link` (email code) or `use_token`."
+            out["login"] = ("Not logged in: after setup, ask for the login line from hyperroute.io "
+                            "(Connect, step 2) and call `use_token`.")
         return out
     if pending:
         ok = None if confirmed else await _consent(
@@ -425,8 +427,7 @@ async def _setup(ctx: Context | None, apply: bool, block_web: bool, first: bool,
             return out
         if ok is None and not confirmed:
             out["applied"] = False
-            tool = "finish_setup" if first else "check_setup"
-            out["message"] = _needs_confirmation(tool, ", apply=true" + (", block_web=true" if block_web else ""))
+            out["message"] = _needs_confirmation("setup", ", apply=true" + (", block_web=true" if block_web else ""))
             return out
         plan = opt["apply"](block_web, cwd)
         out["approved_by"] = "prompt" if ok else "chat"
@@ -434,35 +435,38 @@ async def _setup(ctx: Context | None, apply: bool, block_web: bool, first: bool,
     out["plan"] = _describe_plan(plan)
     out["next"] = "Done. Hooks take effect in new sessions of this agent (restart it, or start a new session)."
     if not health["logged_in"]:
-        out["login"] = "Not logged in yet: offer `login_link` (email code) or `use_token` to finish."
+        out["login"] = ("Not logged in yet: ask for the login line from hyperroute.io (Connect, step 2) "
+                        "and call `use_token`.")
     return out
 
 
 @mcp.tool()
-async def finish_setup(apply: bool = False, block_web: bool = False, confirmed: bool = False,
-                       ctx: Context | None = None) -> dict:
-    """Finish installing HyperRoute for the agent it runs in. Call when the user asks to finish or set
-    up HyperRoute. Without apply it only returns a plan; show it to the user and call again with
-    apply=true only after they agree. block_web=true blocks the agent's own web search/fetch
-    instead of reminding (only if the user asks for it). confirmed=true only when the tool asked you to
-    confirm in chat and the user clearly said yes."""
-    _seen(ctx)
-    return await _setup(ctx, apply, block_web, first=True, confirmed=confirmed)
-
-
-@mcp.tool()
-async def check_setup(apply: bool = False, upgrade: bool = False, block_web: bool | None = None,
-                      confirmed: bool = False, ctx: Context | None = None) -> dict:
-    """Check the HyperRoute installation: versions, what is installed for this agent, what is new.
-    apply=true adds missing pieces (after the user agrees). upgrade=true upgrades the hyperroute-mcp
-    package itself (after the user agrees); the new version runs from the next session. confirmed=true only
-    when the tool asked you to confirm in chat and the user clearly said yes."""
+async def setup(apply: bool = False, upgrade: bool = False, remove: bool = False,
+                block_web: bool | None = None, confirmed: bool = False,
+                ctx: Context | None = None) -> dict:
+    """Set up, check, upgrade or remove HyperRoute for the agent it runs in. Call when the user asks
+    to set up, finish, check, upgrade or remove HyperRoute, or when a `note:` says setup is unfinished
+    or an upgrade is out. With no flags it reports versions and what is installed and returns a plan,
+    changing nothing: show it to the user. apply=true installs what is missing, upgrade=true upgrades
+    the package, remove=true (with apply=true) undoes the setup — each only after the user agrees.
+    block_web=true blocks the agent's own web tools instead of reminding, only if the user asks for
+    it. confirmed=true only when this tool asked you to confirm in chat and the user clearly said
+    yes."""
     _seen(ctx)
     product = _product(ctx)
+    if remove:
+        if not agents.supported(product):
+            return {"agent": product or "unknown", "removed": []}
+        if not apply:
+            plan = agents.OPTIONS[product]["plan"](False, os.getcwd())
+            return {"agent": product,
+                    "would_remove": [s["piece"] for s in plan["steps"] if s["state"] != "add"],
+                    "next": "Only if the user agrees, call `setup` again with remove=true and apply=true."}
+        return agents.OPTIONS[product]["remove"]()
     if block_web is None:
         entry = install.load_record()["agents"].get(product or "") or {}
         block_web = bool((entry.get("options") or {}).get("block_web"))
-    out = await _setup(ctx, apply, block_web, first=False, confirmed=confirmed)
+    out = await _setup(ctx, apply, block_web, confirmed=confirmed)
     if agents.supported(product):
         out["repaired"] = agents.OPTIONS[product]["repair"]()
     if upgrade:
@@ -475,7 +479,7 @@ async def check_setup(apply: bool = False, upgrade: bool = False, block_web: boo
             out["upgrade"] = "The user declined the upgrade."
             return out
         if ok is None and not confirmed:
-            out["upgrade"] = _needs_confirmation("check_setup", ", upgrade=true")
+            out["upgrade"] = _needs_confirmation("setup", ", upgrade=true")
             return out
         try:
             r = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=300)
@@ -485,20 +489,6 @@ async def check_setup(apply: bool = False, upgrade: bool = False, block_web: boo
         except Exception as e:
             out["upgrade"] = {"command": " ".join(cmd), "ok": False, "output": str(e)}
     return out
-
-
-@mcp.tool()
-async def remove_setup(apply: bool = False, ctx: Context | None = None) -> dict:
-    """Undo what finish_setup installed for this agent. Without apply it lists what would be removed."""
-    _seen(ctx)
-    product = _product(ctx)
-    if not agents.supported(product):
-        return {"agent": product or "unknown", "removed": []}
-    if not apply:
-        plan = agents.OPTIONS[product]["plan"](False, os.getcwd())
-        return {"agent": product, "would_remove": [s["piece"] for s in plan["steps"]
-                                                    if s["state"] != "add"]}
-    return agents.OPTIONS[product]["remove"]()
 
 
 @mcp.tool()
@@ -523,62 +513,12 @@ async def use_token(api_key: str) -> dict:
 
 
 @mcp.tool()
-async def register(email: str, password: str, display_name: str | None = None) -> dict:
-    """Register a new HyperRoute account with email + password. This creates an UNVERIFIED
-    account and emails a one-time verification code — it does NOT log you in yet. Call `verify`
-    with the emailed code to finish and get an API key. Registration is a ONE-TIME step — after
-    verifying, the login is saved and reused in every future session."""
-    return await _client().register(email, password, display_name=display_name)
-
-
-@mcp.tool()
-async def verify(email: str, code: str) -> dict:
-    """Confirm the email verification code from `register`. On success the account is verified,
-    the session is logged in, and the token is **saved to disk for all future sessions**.
-    The response carries your `api_key` and one-time `recovery_codes` — SAVE the recovery codes,
-    they're shown once and recover the account if you lose email access."""
-    return _adopt(await _client().verify(email, code))
-
-
-@mcp.tool()
 async def login(email: str, password: str) -> dict:
     """Log in with email + password; logs the session in, returns the profile, and **saves the
-    token for future sessions** (so this is rarely needed twice). An unverified account is asked
-    to verify (a fresh code is emailed — use `verify`).
-
-    Prefer `use_token` where possible: a password typed here is retained in the conversation
-    transcript, a minted token is not."""
+    token for future sessions** (so this is rarely needed twice). Prefer `use_token` with the login
+    line from hyperroute.io: a password typed here is retained in the conversation transcript, a
+    token is not. Tell the user you will see the password before asking for it."""
     return _adopt(await _client().login(email, password))
-
-
-@mcp.tool()
-async def login_link(email: str) -> dict:
-    """Passwordless login: email a one-time login code / magic link to `email`. Then call
-    `verify_login` with the code. No password needed."""
-    return await _client().request_login_code(email)
-
-
-@mcp.tool()
-async def verify_login(email: str, code: str) -> dict:
-    """Complete a passwordless login with the code emailed by `login_link`; logs the session in
-    and saves the token for future sessions."""
-    return _adopt(await _client().login_with_code(email, code))
-
-
-@mcp.tool()
-async def forgot_password(email: str) -> dict:
-    """Request a password-reset code by email. Complete the reset on the website; then log in
-    again here with the new password (or `use_token`)."""
-    return await _client().forgot_password(email)
-
-
-@mcp.tool()
-async def whoami() -> dict:
-    """Return the profile (id, email, display_name, tier, status, verified) of the account
-    currently logged in to this session."""
-    if (err := _require_login()):
-        return err
-    return await _authed(_client().whoami())
 
 
 @mcp.tool()
@@ -653,25 +593,21 @@ async def describe(tool_id: str, sections: list[str] | None = None,
 
 
 @mcp.tool()
-async def facets_catalog() -> dict:
-    """The full list of facets HyperRoute ranks tools on, fetched ONCE — reference for filling
-    `facets` on `recommend` and for choosing what to persist with `set_preferences`. Each entry
-    has its `scope` (global = a query-independent tool property; tool = query-specific quality),
-    `kind` (price/capacity/live/compliance/quality), human `label`/`description`, the default
-    `{kano, weight, threshold}`, and `constraint: true` for the compliance checks (gdpr_compliant,
-    soc2, …) — the user-level requirements worth storing standing. No login required."""
-    return await _client().facets_catalog()
-
-
-@mcp.tool()
 async def get_preferences(project_id: str | None = None) -> dict:
     """Show the caller's STANDING facet layer: the facets HyperRoute merges into every
     `recommend` automatically (a saved GDPR/budget constraint, a habitual price stance). Returns the
-    `user` layer, the `project` layer when `project_id` is given, and the `effective` merge. Requires
-    login."""
+    `user` layer, the `project` layer when `project_id` is given, and the `effective` merge, plus
+    `catalog`: every facet that can be set, with its scope, kind, label, default
+    `{kano, weight, threshold}`, and `constraint: true` for the compliance checks worth storing
+    (gdpr_compliant, soc2, …). Requires login."""
     if (err := _require_login()):
         return err
-    return await _authed(_client().get_preferences(project_id))
+    out = await _authed(_client().get_preferences(project_id))
+    if isinstance(out, dict) and not out.get("_error"):
+        catalog = await _client().facets_catalog()
+        if isinstance(catalog, dict) and not catalog.get("_error"):
+            out["catalog"] = catalog
+    return out
 
 
 @mcp.tool()
@@ -713,15 +649,6 @@ async def onboard(tool_id: str, api_key: str, label: str | None = None) -> dict:
     if (err := _require_login()):
         return err
     return await _authed(_client().onboard(tool_id, api_key, label=label))
-
-
-@mcp.tool()
-async def list_credentials() -> dict:
-    """List the tool credentials connected under the logged-in user (keys masked — only
-    metadata and last-test status surface). Requires `register`/`login` first."""
-    if (err := _require_login()):
-        return err
-    return await _authed(_client().list_credentials(_session.user_id or "anon"))
 
 
 @mcp.tool()
@@ -839,24 +766,17 @@ async def my_tools() -> dict:
     """List the tools the USER has declared as their own (`__own__:…` ids), each with its
     triggers verbatim — the sentences saying when it should be used — and its stance. Call this
     when the user asks what HyperRoute knows they have, or before updating/removing one so you use
-    the right id."""
+    the right id. `report` is the user's own track record on those tools: how their reported
+    outcomes went, beside whether HyperRoute holds tested alternatives. Relay it as their record,
+    never as a verdict that their tool is worse."""
     if (err := _require_login()):
         return err
-    return await _authed(_client().list_private_tools())
-
-
-@mcp.tool()
-async def suggest_my_tool_regions(description: str, name: str = "my tool") -> dict:
-    """Preview which named capabilities a description maps onto. OPTIONAL, and it decides NOTHING.
-
-    These regions are wording for the user's own outcome report (`my_tool_report`) — "strong on
-    paper search, weak on realtime web". They are NOT how a declared tool gets routed to: that is
-    the trigger sentence you pass to `declare_my_tool`. Do not call this before declaring, and
-    never let a poor match here stop you from declaring — a tool whose description maps onto
-    nothing at all still routes perfectly well off its trigger."""
-    if (err := _require_login()):
-        return err
-    return await _authed(_client().suggest_private_regions(name, description))
+    out = await _authed(_client().list_private_tools())
+    if isinstance(out, dict) and not out.get("_error"):
+        report = await _authed(_client().console("own", _session.user_id or "anon"))
+        if isinstance(report, dict) and not report.get("_error"):
+            out["report"] = report
+    return out
 
 
 @mcp.tool()
@@ -950,24 +870,6 @@ async def remove_my_tool(tool_id: str) -> dict:
 
 
 @mcp.tool()
-async def my_tool_report() -> dict:
-    """The user's OWN track record on the tools they declared, per capability region: how their
-    reported outcomes came out, and whether HyperRoute holds tested alternatives in the same region.
-
-    This is what turns a pinned tool into an informed choice. Deliver it when the user asks how
-    their tools are doing, or when you notice a declared tool repeatedly underdelivering.
-
-    Two things to keep straight when you relay it: these are the USER'S OWN reports on their own
-    tool, not HyperRoute measurements — nothing here tested their tool — and they are NOT on the
-    same scale as a catalog tool's score. Say what their record shows and what tested alternatives
-    exist; do not tell them their tool is worse. If they want HyperRoute to start preferring a
-    better-scoring catalog tool in some region, that is `update_my_tool(stance="benchmarked")`."""
-    if (err := _require_login()):
-        return err
-    return await _authed(_client().console("own", _session.user_id or "anon"))
-
-
-@mcp.tool()
 async def my_preferred_tools() -> dict:
     """List the catalog tools the USER has asked HyperRoute to favour, each with its margin and
     note. Call this when the user asks what HyperRoute leans toward, or before changing/removing
@@ -1010,19 +912,6 @@ async def prefer_tool(tool: str, margin: float | None = None, note: str = "",
             f"whenever it is acceptable and within {float(pref.get('margin', 0.1)):.2f} of the best "
             "tool on capability, and that each ranking will say whether it was served or passed over.")
     return out
-
-
-@mcp.tool()
-async def update_preferred_tool(tool_id: str, margin: float | None = None,
-                                note: str | None = None) -> dict:
-    """Change one preference's margin or note; only the fields you pass are changed. Use this when
-    the user says the bias should be stronger or weaker ("actually, only use it when it's nearly as
-    good")."""
-    if (err := _require_login()):
-        return err
-    body = {"margin": margin, "note": note}
-    return await _authed(_client().update_preferred_tool(
-        tool_id, {k: v for k, v in body.items() if v is not None}))
 
 
 @mcp.tool()

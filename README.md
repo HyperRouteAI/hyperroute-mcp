@@ -53,17 +53,14 @@ then ask the agent to *"finish HyperRoute setup"*. Any other MCP client:
 
 ## Setup, checks and upgrades
 
-- `finish_setup` shows what it would add for your agent (in Claude Code: hooks that make the agent and
-  its subagents route through HyperRoute) and applies it only when you agree.
-- `check_setup` checks versions and the installed pieces, and upgrades when you agree.
-- `remove_setup` (or `hyperroute-mcp install --remove`) undoes it.
+Ask your agent to set up, check, upgrade or remove HyperRoute; it calls `setup`, shows you what it
+would change, and applies it when you agree. `hyperroute-mcp install --remove` also undoes it.
 
-## Authenticate once
+## Log in
 
-`recommend` and browsing are public — no account. Connecting keys and running tools need one.
-Mint a personal access token at [hyperroute.io](https://hyperroute.io) and hand it to the
-`use_token` tool; your password never enters the conversation. The login is cached on disk and
-restored in every new session until the router invalidates it.
+Routing needs an account. On [hyperroute.io](https://hyperroute.io), open Connect and copy the login
+line from the MCP tab into your agent; it calls `use_token`. Email and password (`login`) also work.
+The login is saved and reused in every later session.
 
 ## Your coordinator
 
@@ -74,20 +71,18 @@ which coordinator launched it and declares it for you; `session_info` shows what
 
 | Tool | What it does |
 |---|---|
-| `recommend` | Task → ranked tools and how to act. Requires login. |
+| `recommend` | Task → ranked tools and how to act. |
 | `execute` | Run the chosen tool with your connected key; returns the result. |
 | `connect_info` / `onboard` | A tool's signup steps; save and test its API key. |
 | `report_outcome` / `report_narrative` | Feedback on a call, or on a whole run. |
 | `describe` | One tool's details: `about` · `price` · `facets` · `evidence`. |
-| `facets_catalog` / `get_preferences` / `set_preferences` | Preferences applied to every route. |
-| `list_credentials` | Your connected tools (keys masked). |
 | `fetch_result` | Page through a large result. |
-| `console` | History, tools, keys, stats. |
-| `my_tools` / `declare_my_tool` / `update_my_tool` / `remove_my_tool` / `my_tool_report` | Tools you already have, and when to use them. |
-| `my_preferred_tools` / `prefer_tool` / `update_preferred_tool` / `unprefer_tool` | Catalog tools you favour. |
-| `finish_setup` / `check_setup` / `remove_setup` | Setup, version checks and upgrades for your agent. |
-| `session_info` / `health` | Connection and login state; router status. |
-| `use_token` / `login_link` / `verify_login` / `login` / `register` / `verify` / `forgot_password` / `whoami` | Account. |
+| `get_preferences` / `set_preferences` | Preferences applied to every route, and every facet you can set. |
+| `console` | History, connected keys, tools, stats. |
+| `my_tools` / `declare_my_tool` / `update_my_tool` / `remove_my_tool` | Tools you already have, when to use them, and how they did. |
+| `my_preferred_tools` / `prefer_tool` / `unprefer_tool` | Catalog tools you favour. |
+| `session_info` / `setup` | Connection, login and versions; set up, check, upgrade or remove. |
+| `use_token` / `login` | Log in. |
 
 A ranking looks like:
 
