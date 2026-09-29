@@ -137,9 +137,6 @@ async def test_private_tool_calls_are_authenticated_and_well_addressed():
     req = await _capture("delete_private_tool", "__own__:my_search")
     assert req.method == "DELETE" and req.url.path == "/private-tools/__own__:my_search"
 
-    req = await _capture("suggest_private_regions", "n", "d")
-    assert req.method == "POST" and req.url.path == "/private-tools/suggest"
-
 
 async def test_execute_waits_longer_than_other_calls(monkeypatch):
     seen = []

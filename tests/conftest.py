@@ -47,6 +47,18 @@ class FakeClient:
     def last(self, name: str) -> dict:
         return next(p for n, p in reversed(self.calls) if n == name)
 
+    async def health(self):
+        self._record("health", {})
+        return self.answers.get("health", {"ready": True, "routable": True})
+
+    async def whoami(self):
+        self._record("whoami", {})
+        return self.answers.get("whoami", {"email": "a@x.io", "tier": "free", "status": "active"})
+
+    async def facets_catalog(self):
+        self._record("facets_catalog", {})
+        return self.answers.get("facets_catalog", {"facets": []})
+
     async def catalog(self):
         self._record("catalog", {})
         return self.answers.get("catalog", self.CATALOG)
@@ -80,10 +92,6 @@ class FakeClient:
         self._record("list_private_tools", {"project_id": project_id})
         return self.answers.get("list_private_tools", {"tools": []})
 
-    async def suggest_private_regions(self, name, description=None):
-        self._record("suggest_private_regions", {"name": name, "description": description})
-        return self.answers.get("suggest_private_regions", self.SUGGESTIONS)
-
     async def declare_private_tool(self, payload):
         self._record("declare_private_tool", payload)
         return self.answers.get("declare_private_tool", {
@@ -94,10 +102,6 @@ class FakeClient:
         self._record("update_private_tool", {"tool_id": tool_id, **payload})
         return self.answers.get("update_private_tool",
                                 {"updated": {"tool_id": tool_id, **payload}})
-
-    async def set_private_stance(self, tool_id, stance, project_id=None):
-        self._record("set_private_stance", {"tool_id": tool_id, "stance": stance})
-        return self.answers.get("set_private_stance", {"updated": {"tool_id": tool_id}})
 
     async def delete_private_tool(self, tool_id, project_id=None):
         self._record("delete_private_tool", {"tool_id": tool_id})
@@ -113,10 +117,6 @@ class FakeClient:
             "preferred": {"tool_id": "kagi_search", "margin": payload.get("margin") or 0.1,
                           "note": payload.get("note") or "", "name": "Kagi Search"},
             "tool": {"id": "kagi_search", "name": "Kagi Search"}})
-
-    async def update_preferred_tool(self, tool_id, payload):
-        self._record("update_preferred_tool", {"tool_id": tool_id, **payload})
-        return self.answers.get("update_preferred_tool", {"updated": {"tool_id": tool_id, **payload}})
 
     async def delete_preferred_tool(self, tool_id, project_id=None):
         self._record("delete_preferred_tool", {"tool_id": tool_id})

@@ -51,7 +51,6 @@ class HyperRouteClient:
         if auth and self.session.api_key:
             h["authorization"] = f"Bearer {self.session.api_key}"
         return h
-
     async def _request(self, method: str, path: str, *, auth: bool = False,
                        json: dict | None = None, params: dict | None = None,
                        as_text: bool = False, tag: bool = False,
@@ -81,125 +80,68 @@ class HyperRouteClient:
         if as_text and r.is_success:
             return r.text
         return _unwrap(r)
-
     async def collectors(self) -> Any:
         async with httpx.AsyncClient(timeout=1.5) as c:
             r = await c.get(f"{self.base_url}/caller/collectors")
         return r.json() if r.is_success else None
-
     async def health(self) -> Any:
         return await self._request("GET", "/health")
-
-    async def register(self, email: str, password: str, display_name: str | None) -> Any:
-        return await self._request("POST", "/auth/register",
-                                   json={"email": email, "password": password,
-                                         "display_name": display_name})
-
-    async def verify(self, email: str, code: str) -> Any:
-        return await self._request("POST", "/auth/verify", json={"email": email, "code": code})
-
     async def login(self, email: str, password: str) -> Any:
         return await self._request("POST", "/auth/login", json={"email": email, "password": password})
-
-    async def request_login_code(self, email: str) -> Any:
-        return await self._request("POST", "/auth/login/request-code", json={"email": email})
-
-    async def login_with_code(self, email: str, code: str) -> Any:
-        return await self._request("POST", "/auth/login/code", json={"email": email, "code": code})
-
-    async def forgot_password(self, email: str) -> Any:
-        return await self._request("POST", "/auth/password/forgot", json={"email": email})
-
     async def whoami(self) -> Any:
         return await self._request("POST", "/auth/whoami", auth=True)
-
     async def recommend_text(self, payload: dict) -> Any:
         return await self._request("POST", "/recommend", auth=True,
                                    json={**payload, "detail": "min", "format": "text"},
                                    as_text=True, tag=True)
-
     async def describe(self, payload: dict) -> Any:
         return await self._request("POST", "/describe", auth=True, json=payload)
-
     async def catalog(self) -> Any:
         return await self._request("GET", "/console", params={"view": "tools", "format": "json"})
-
     async def onboard_info(self, tool_id: str) -> Any:
         return await self._request("GET", f"/onboard/{tool_id}", auth=True)
-
     async def onboard(self, tool_id: str, api_key: str, label: str | None) -> Any:
         return await self._request("POST", "/onboard", auth=True,
                                    json={"tool_id": tool_id, "api_key": api_key, "label": label})
-
     async def execute(self, tool_id: str, query: str, session_id: str | None = None) -> Any:
         return await self._request("POST", "/execute", auth=True,
                                    json={"tool_id": tool_id, "query": query, "session_id": session_id}, tag=True,
                                    timeout=config.execute_timeout())
-
     async def read_result(self, ref: str, op: str, offset: int, limit: int,
                           path: list | None, query: str | None) -> Any:
         return await self._request("POST", f"/result/{ref}/read", auth=True,
                                    json={"op": op, "offset": offset, "limit": limit,
                                          "path": path, "query": query})
-
-    async def list_credentials(self, user_id: str) -> Any:
-        return await self._request("GET", "/credentials", auth=True, params={"user_id": user_id})
-
     async def report_outcome(self, payload: dict) -> Any:
         return await self._request("POST", "/report_outcome", auth=True, json=payload, tag=True)
-
     async def report_narrative(self, payload: dict) -> Any:
         return await self._request("POST", "/report_narrative", auth=True, json=payload)
-
     async def console(self, view: str, user_id: str) -> Any:
         return await self._request("GET", "/console", auth=True,
                                    params={"view": view, "format": "json", "user_id": user_id})
-
     async def facets_catalog(self) -> Any:
         return await self._request("GET", "/facets/catalog")
-
     async def get_preferences(self, project_id: str | None = None) -> Any:
         return await self._request("GET", "/preferences", auth=True,
                                    params={"project_id": project_id})
-
     async def set_preferences(self, facets: dict, project_id: str | None = None) -> Any:
         return await self._request("PUT", "/preferences", auth=True,
                                    json={"facets": facets, "project_id": project_id})
-
     async def list_private_tools(self, project_id: str | None = None) -> Any:
         return await self._request("GET", "/private-tools", auth=True,
                                    params={"project_id": project_id})
-
-    async def suggest_private_regions(self, name: str, description: str | None = None) -> Any:
-        return await self._request("POST", "/private-tools/suggest", auth=True,
-                                   json={"name": name, "description": description})
-
     async def declare_private_tool(self, payload: dict) -> Any:
         return await self._request("PUT", "/private-tools", auth=True, json=payload)
-
     async def update_private_tool(self, tool_id: str, payload: dict) -> Any:
         return await self._request("PATCH", f"/private-tools/{tool_id}", auth=True, json=payload)
-
-    async def set_private_stance(self, tool_id: str, stance: str,
-                                 project_id: str | None = None) -> Any:
-        return await self._request("POST", f"/private-tools/{tool_id}/stance", auth=True,
-                                   params={"stance": stance, "project_id": project_id})
-
     async def delete_private_tool(self, tool_id: str, project_id: str | None = None) -> Any:
         return await self._request("DELETE", f"/private-tools/{tool_id}", auth=True,
                                    params={"project_id": project_id})
-
     async def list_preferred_tools(self, project_id: str | None = None) -> Any:
         return await self._request("GET", "/preferred-tools", auth=True,
                                    params={"project_id": project_id})
-
     async def prefer_tool(self, payload: dict) -> Any:
         return await self._request("PUT", "/preferred-tools", auth=True, json=payload)
-
-    async def update_preferred_tool(self, tool_id: str, payload: dict) -> Any:
-        return await self._request("PATCH", f"/preferred-tools/{tool_id}", auth=True,
-                                   json=payload)
-
     async def delete_preferred_tool(self, tool_id: str, project_id: str | None = None) -> Any:
         return await self._request("DELETE", f"/preferred-tools/{tool_id}", auth=True,
                                    params={"project_id": project_id})

@@ -87,7 +87,7 @@ def install_command(argv: list[str]) -> int:
     print("HyperRoute could not tell which agent is running this command.")
     print("Claude Code: rerun as `" + _self("install", "--agent", "claude_code") + "`.")
     print("Other agents: add an MCP server named hyperroute that runs `"
-          + " ".join(_launch()) + "`, then ask it to `finish_setup`.")
+          + " ".join(_launch()) + "`, then ask it to run HyperRoute's `setup`.")
     return 1
 
 
