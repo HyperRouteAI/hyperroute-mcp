@@ -55,8 +55,9 @@ def login_first(server: str) -> str:
     return (
         "HyperRoute is not logged in yet, so it cannot route anything. Before doing ANY outside task, "
         "stop and ask the user to log in to HyperRoute, and do not do the task another way meanwhile. "
-        f"Two ways: an emailed code (`{p}login_link` with their email, then `{p}verify_login` with the "
-        f"code), or a token they copy from https://hyperroute.io (Connect) and you pass to `{p}use_token`."
+        "Two ways: they paste the login line from https://hyperroute.io (Connect, MCP tab, step 2) and "
+        f"you call `{p}use_token` with its token; or they give you their email and password for "
+        f"`{p}login` (tell them you will see the password)."
     )
 
 

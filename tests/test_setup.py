@@ -147,7 +147,7 @@ def test_widened_piece_needs_fresh_consent(monkeypatch):
 def test_hooks_say_log_in_first_when_logged_out(monkeypatch):
     monkeypatch.setattr(hooks, "logged_in", lambda: False)
     s = hooks.output("session-start", [])["hookSpecificOutput"]["additionalContext"]
-    assert s.startswith("HyperRoute is not logged in yet") and "mcp__hyperroute__login_link" in s
+    assert s.startswith("HyperRoute is not logged in yet") and "mcp__hyperroute__use_token" in s
     monkeypatch.setattr(hooks, "logged_in", lambda: True)
     s = hooks.output("session-start", [])["hookSpecificOutput"]["additionalContext"]
     assert "not logged in" not in s
