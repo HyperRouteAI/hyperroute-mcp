@@ -31,25 +31,33 @@ def test_install_without_agent_explains(capsys):
     assert "--agent claude_code" in capsys.readouterr().out
 
 
-def test_install_in_claude_code_asks_before_hooks(monkeypatch, capsys):
+def test_install_in_claude_code_does_it_all(monkeypatch, capsys):
     monkeypatch.setenv("CLAUDECODE", "1")
     assert cli.main(["install"]) == 0
     out = capsys.readouterr().out
     assert "claude mcp add --scope user hyperroute --" in out
-    assert "Yes: type  ! " in out and "install --apply" in out and len(out.splitlines()) <= 6
-    assert not agents.claude_settings().exists()
-
-
-def test_install_apply_then_remove(monkeypatch, capsys):
-    monkeypatch.setenv("CLAUDECODE", "1")
-    assert cli.main(["install", "--apply"]) == 0
+    assert "HyperRoute is set up for Claude Code and its subagents." in out
+    assert "paste your login line" in out
     hooks = json.loads(agents.claude_settings().read_text())["hooks"]
     assert set(hooks) == {"SessionStart", "SubagentStart", "PreToolUse"}
+
+
+def test_install_twice_then_remove(monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    cli.main(["install"])
+    cli.main(["install"])
+    hooks = json.loads(agents.claude_settings().read_text())["hooks"]
+    assert all(len(v) == 1 for v in hooks.values())
     capsys.readouterr()
-    assert cli.main(["install"]) == 0
-    assert "Restart Claude Code if" in capsys.readouterr().out
     assert cli.main(["install", "--remove"]) == 0
     assert json.loads(agents.claude_settings().read_text()) == {}
+
+
+def test_logged_in_install_only_says_restart(monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setattr(cli.hooks, "logged_in", lambda: True)
+    cli.main(["install"])
+    assert capsys.readouterr().out.strip().splitlines()[-1] == "Restart Claude Code to start using it."
 
 
 def test_already_registered_is_not_re_added(monkeypatch, sandbox, capsys):
@@ -58,4 +66,5 @@ def test_already_registered_is_not_re_added(monkeypatch, sandbox, capsys):
     (sandbox / "claude" / ".claude.json").write_text(json.dumps(
         {"mcpServers": {"hr": {"command": "uvx", "args": ["hyperroute-mcp@latest"]}}}))
     cli.main(["install"])
-    assert "HyperRoute is already in Claude Code." in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "claude mcp add" not in out and "HyperRoute is set up" in out
