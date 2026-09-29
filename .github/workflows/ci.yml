@@ -11,8 +11,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Oldest and newest supported — version breakage lives at the ends, and the
-        # middle versions have never told us anything the ends didn't.
         python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4

@@ -205,7 +205,7 @@ def _read_sqlite(probe: dict, vars: dict) -> dict:
     finally:
         con.close()
     if not jcol:
-        return {out[c]: v for c, v in zip(select, rows[0])} if rows else {}
+        return {out[c]: v for c, v in zip(select, rows[0], strict=False)} if rows else {}
     cond = probe.get("json_where") or {}
     for (raw,) in rows:
         try:

@@ -1,15 +1,3 @@
-"""Persistent login.
-
-Caches the account's personal access token on disk so the user authenticates ONCE and every
-later MCP session (a fresh process each time) silently reuses it — no re-entering email codes.
-Re-auth is needed only when HyperRoute invalidates the token (revoked/expired → 401), which
-clears the cache.
-
-File: `$HYPERROUTE_TOKEN_FILE` or `~/.hyperroute/token.json`, written 0600. Keyed by base URL so
-one machine can hold tokens for several routers. Bypassed entirely when `HYPERROUTE_API_KEY` is
-set (that token is externally managed — we neither read nor write the cache).
-"""
-
 from __future__ import annotations
 
 import json
@@ -40,7 +28,6 @@ def _write_all(data: dict) -> None:
 
 
 def load(base_url: str) -> dict | None:
-    """The saved `{api_key, user_id, email}` for `base_url`, or None."""
     entry = _read_all().get(base_url)
     return entry if entry and entry.get("api_key") else None
 

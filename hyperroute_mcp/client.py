@@ -1,37 +1,20 @@
-"""Thin async HTTP client over the HyperRoute router's public API.
-
-One method per endpoint this server touches. No product logic lives here — the client only
-knows how to (a) carry the session bearer token, and (b) turn the router's responses into
-plain dicts, surfacing its structured `detail` error bodies instead of raising, so the MCP
-tools can hand a coordinator an actionable object (e.g. `needs_onboard` + signup instructions)
-rather than a stack trace.
-
-One endpoint answers in text rather than JSON: `recommend` with `format=text` returns the
-compact tabular coordinator wire, so `_request(..., as_text=True)` returns a `str`.
-"""
-
 from __future__ import annotations
 
 from typing import Any
 
 import httpx
 
-from . import config
+from . import config, install
 from .caller import HEADER, Caller
 
 
 class Session:
-    """The MCP process's login state: the active bearer token and the resolved user_id.
-
-    Mutated in place by `register` / `login` so every later recommend/onboard/execute call
-    is authenticated as the same user for the life of the MCP connection.
-    """
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key
         self.user_id: str | None = None
         self.email: str | None = None
-        self.env_managed = False   # token came from HYPERROUTE_API_KEY — don't read/write the cache
+        self.env_managed = False
 
     @property
     def logged_in(self) -> bool:
@@ -39,8 +22,6 @@ class Session:
 
 
 def _unwrap(r: httpx.Response) -> Any:
-    """Router response -> dict. Success bodies pass through; error bodies are normalized to
-    `{"_error": True, "_http_status": <code>, ...}` with the server's `detail` merged in."""
     try:
         body = r.json()
     except ValueError:
@@ -57,7 +38,6 @@ def _unwrap(r: httpx.Response) -> Any:
 
 
 class HyperRouteClient:
-    """Stateless-per-call HTTP client bound to a mutable `Session` for auth."""
 
     def __init__(self, base_url: str, session: Session, timeout: float = 30.0,
                  caller: Caller | None = None) -> None:
@@ -67,7 +47,7 @@ class HyperRouteClient:
         self.caller = caller
 
     def _headers(self, auth: bool) -> dict[str, str]:
-        h = {"content-type": "application/json"}
+        h = {"content-type": "application/json", install.REQUEST_HEADER: install.version()}
         if auth and self.session.api_key:
             h["authorization"] = f"Bearer {self.session.api_key}"
         return h
@@ -76,7 +56,7 @@ class HyperRouteClient:
                        json: dict | None = None, params: dict | None = None,
                        as_text: bool = False, tag: bool = False,
                        timeout: float | None = None) -> Any:
-        if json is not None:  # drop None fields so router defaults apply
+        if json is not None:
             json = {k: v for k, v in json.items() if v is not None}
         sent = None
         if tag and self.caller is not None and json is not None:
@@ -95,13 +75,13 @@ class HyperRouteClient:
                                     headers=self._headers(auth), json=json, params=params)
         except httpx.RequestError as e:
             return {"_error": True, "message": f"could not reach router at {self.base_url}: {e}"}
+        install.note_router(r.headers.get(install.RESPONSE_HEADER))
         if sent is not None:
             self.caller.ack(r.headers.get(HEADER), sent, r.is_success)
         if as_text and r.is_success:
             return r.text
         return _unwrap(r)
 
-    # -- surfaces -----------------------------------------------------------
     async def collectors(self) -> Any:
         async with httpx.AsyncClient(timeout=1.5) as c:
             r = await c.get(f"{self.base_url}/caller/collectors")
@@ -134,8 +114,6 @@ class HyperRouteClient:
         return await self._request("POST", "/auth/whoami", auth=True)
 
     async def recommend_text(self, payload: dict) -> Any:
-        """The coordinator wire: `detail=min` + `format=text` → compact tabular text (a `str`),
-        or the usual error dict. Depth is pulled per-tool afterwards via `describe`."""
         return await self._request("POST", "/recommend", auth=True,
                                    json={**payload, "detail": "min", "format": "text"},
                                    as_text=True, tag=True)
@@ -144,8 +122,6 @@ class HyperRouteClient:
         return await self._request("POST", "/describe", auth=True, json=payload)
 
     async def catalog(self) -> Any:
-        """The router's tool catalog (id + kind + auth + capabilities). Public; used to resolve
-        which coordinator ids exist before declaring the native baseline."""
         return await self._request("GET", "/console", params={"view": "tools", "format": "json"})
 
     async def onboard_info(self, tool_id: str) -> Any:
@@ -170,9 +146,6 @@ class HyperRouteClient:
         return await self._request("GET", "/credentials", auth=True, params={"user_id": user_id})
 
     async def report_outcome(self, payload: dict) -> Any:
-        """Gated: an outcome is a per-user mutation of the flywheel, and the router attributes the
-        write to the AUTHENTICATED account (it will not take a caller-supplied identity). Without
-        the bearer this is a flat 401, so the whole reporting hook silently stops working."""
         return await self._request("POST", "/report_outcome", auth=True, json=payload, tag=True)
 
     async def report_narrative(self, payload: dict) -> Any:
@@ -193,7 +166,6 @@ class HyperRouteClient:
         return await self._request("PUT", "/preferences", auth=True,
                                    json={"facets": facets, "project_id": project_id})
 
-    # -- private tools (the caller's own declared tools) ---------------------
     async def list_private_tools(self, project_id: str | None = None) -> Any:
         return await self._request("GET", "/private-tools", auth=True,
                                    params={"project_id": project_id})
@@ -217,7 +189,6 @@ class HyperRouteClient:
         return await self._request("DELETE", f"/private-tools/{tool_id}", auth=True,
                                    params={"project_id": project_id})
 
-    # -- preferred tools (the caller's bias toward a catalog tool) ------------
     async def list_preferred_tools(self, project_id: str | None = None) -> Any:
         return await self._request("GET", "/preferred-tools", auth=True,
                                    params={"project_id": project_id})
