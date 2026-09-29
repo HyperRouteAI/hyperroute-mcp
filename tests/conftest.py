@@ -1,34 +1,34 @@
-"""Test env: never touch the developer's real token cache or a real router.
-
-The env is set at import time — before any test module imports `hyperroute_mcp.server`, which
-restores a session from disk at import.
-"""
-
 import os
 import tempfile
 
 _TMP = tempfile.mkdtemp(prefix="hyperroute-mcp-test-")
 os.environ["HYPERROUTE_TOKEN_FILE"] = os.path.join(_TMP, "token.json")
 os.environ["HYPERROUTE_BASE_URL"] = "http://router.test"
+os.environ["HYPERROUTE_HOME"] = os.path.join(_TMP, "home")
+os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(_TMP, "claude")
 for _leak in ("HYPERROUTE_API_KEY", "HYPERROUTE_COORDINATOR",
               "HYPERROUTE_NATIVE_TOOLS", "HYPERROUTE_HELD"):
     os.environ.pop(_leak, None)
 
-import pytest  # noqa: E402
+import pytest
 
-from hyperroute_mcp import native  # noqa: E402
+from hyperroute_mcp import install, native
+
+
+@pytest.fixture(autouse=True)
+def _offline_versions(monkeypatch):
+    monkeypatch.setattr(install, "_pypi_latest", lambda: None)
+    monkeypatch.setattr(install, "_router", {"latest": None, "min": None})
 
 
 @pytest.fixture(autouse=True)
 def _clean_native_cache():
-    """Coordinator ids are cached per process; a stale cache would leak across tests."""
     native.reset_cache()
     yield
     native.reset_cache()
 
 
 class FakeClient:
-    """Stands in for HyperRouteClient: records calls, replays canned answers."""
 
     CATALOG = {"tools": [
         {"id": "claude_code_opus_deep", "kind": "coordinator_agent"},
@@ -67,7 +67,6 @@ class FakeClient:
         self._record("console", {"view": view, "user_id": user_id})
         return self.answers.get("console", {"view": view, "tools": []})
 
-    # -- private tools ------------------------------------------------------
     SUGGESTIONS = {"suggestions": [
         {"id": "web_search_realtime", "label": "Realtime web search",
          "similarity": 0.71, "in_taxonomy": True},
@@ -104,7 +103,6 @@ class FakeClient:
         self._record("delete_private_tool", {"tool_id": tool_id})
         return self.answers.get("delete_private_tool", {"deleted": True})
 
-    # -- preferred tools ----------------------------------------------------
     async def list_preferred_tools(self, project_id=None):
         self._record("list_preferred_tools", {"project_id": project_id})
         return self.answers.get("list_preferred_tools", {"tools": []})

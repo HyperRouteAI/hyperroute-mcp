@@ -3,7 +3,10 @@
   "mcp": {
     "hyperroute": {
       "type": "local",
-      "command": ["hyperroute-mcp"],
+      "command": [
+        "uvx",
+        "hyperroute-mcp@latest"
+      ],
       "enabled": true
     }
   }

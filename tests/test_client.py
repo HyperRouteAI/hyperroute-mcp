@@ -1,6 +1,3 @@
-"""The HTTP client: error bodies become actionable dicts (never exceptions), and the coordinator
-wire asks for the lean text projection."""
-
 import httpx
 import pytest
 
@@ -34,7 +31,6 @@ def test_unwrap_survives_a_non_json_error_body():
 
 
 class _Transport(httpx.AsyncBaseTransport):
-    """Captures the outgoing request and replays one canned response."""
 
     def __init__(self, response: httpx.Response):
         self.response, self.request = response, None
@@ -104,10 +100,7 @@ async def test_no_bearer_is_sent_when_logged_out(patched):
     assert "authorization" not in t.request.headers
 
 
-# -- private tools + the gated report path -----------------------------------
-
 async def _capture(method, *args, **kwargs):
-    """Run one client call against a canned 200 and hand back the outgoing request."""
     t = _Transport(_resp(200, {"ok": True}))
     c = HyperRouteClient("http://router.test", Session("hyr_k"), timeout=5)
     import httpx as _httpx
@@ -124,8 +117,6 @@ async def _capture(method, *args, **kwargs):
 
 
 async def test_report_outcome_is_authenticated():
-    """The router gates it and attributes the write to the authenticated account; unauthenticated
-    it is a flat 401 and the whole reporting hook silently stops working."""
     req = await _capture("report_outcome", {"session_id": "s-1", "tool_id": "t", "score": "full"})
     assert req.headers.get("authorization") == "Bearer hyr_k"
 
@@ -156,7 +147,8 @@ async def test_execute_waits_longer_than_other_calls(monkeypatch):
 
     def spy(*a, **kw):
         seen.append(kw.get("timeout"))
-        return real(*a, transport=_Transport(_resp(200, {"ok": True})), **{k: v for k, v in kw.items() if k != "transport"})
+        rest = {k: v for k, v in kw.items() if k != "transport"}
+        return real(*a, transport=_Transport(_resp(200, {"ok": True})), **rest)
 
     monkeypatch.setattr(httpx, "AsyncClient", spy)
     c = HyperRouteClient("http://t", Session("k"), timeout=30)

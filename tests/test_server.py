@@ -1,6 +1,3 @@
-"""The MCP tool layer: what gets sent to the router, what gets handed back to the coordinator,
-and the login gate on every per-user verb."""
-
 import pytest
 
 from hyperroute_mcp import server, tokenstore
@@ -8,7 +5,8 @@ from hyperroute_mcp.client import Session
 
 from .conftest import FakeClient
 
-TOOLS = {"session_info", "health", "recommend", "describe", "execute", "onboard", "connect_info",
+TOOLS = {"session_info", "health", "finish_setup", "check_setup", "remove_setup", "recommend",
+         "describe", "execute", "onboard", "connect_info",
          "report_outcome", "report_narrative", "facets_catalog", "get_preferences",
          "set_preferences", "list_credentials", "fetch_result", "console", "use_token",
          "register", "verify", "login", "login_link", "verify_login", "forgot_password",
@@ -19,10 +17,10 @@ TOOLS = {"session_info", "health", "recommend", "describe", "execute", "onboard"
 
 @pytest.fixture
 def fake(monkeypatch):
-    """Route every tool through a FakeClient and pretend we run inside Claude Code."""
     c = FakeClient()
     monkeypatch.setattr(server, "_client", lambda: c)
     monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
+    monkeypatch.setattr(server, "_session", Session("hyr_test"))
     return c
 
 
@@ -31,7 +29,22 @@ def logged_in(monkeypatch):
     monkeypatch.setattr(server, "_session", Session("hyr_test"))
 
 
-# -- registration ------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _quiet_notices():
+    server._told.update({"setup", "upgrade", "unsupported"})
+    yield
+    server._told.clear()
+
+
+async def test_notice_rides_the_first_result_once(fake, monkeypatch):
+    server._told.clear()
+    monkeypatch.setattr(server, "_product", lambda ctx: "claude_code")
+    first = await server.recommend("q")
+    second = await server.recommend("q")
+    assert "note: HyperRoute setup is not finished" in first
+    assert "note:" not in second
+
+
 async def test_every_tool_is_registered():
     assert {t.name for t in await server.mcp.list_tools()} == TOOLS
 
@@ -41,20 +54,16 @@ async def test_instructions_carry_the_hard_rule_and_the_native_exception():
     assert "NEVER permitted to perform an external task on your own" in text
     assert "use_native" in text
     assert "use_own" in text
-    for word in ("ready", "needs_key", "native", "own", "soon"):   # the `use` column legend
+    for word in ("ready", "needs_key", "native", "own", "soon"):
         assert word in text
 
 
-# -- reading the client's identity off the handshake -------------------------
 class _Info:
     def __init__(self, name):
         self.name = name
 
 
 class _Ctx:
-    """Stands in for the injected Context. The SDK renamed this field between majors, and the
-    failure is SILENT — an unread client name means no baseline and an external tool wins every
-    task — so both spellings are pinned here."""
 
     def __init__(self, **params):
         self.session = type("S", (), {"client_params": type("P", (), params)()})()
@@ -73,7 +82,6 @@ def test_client_name_is_none_when_unavailable(ctx):
     assert server._client_name(ctx) is None
 
 
-# -- recommend: the lean wire + the declaration ------------------------------
 async def test_recommend_returns_the_routers_text_verbatim(fake):
     out = await server.recommend("find recent RCTs on statins")
     assert isinstance(out, str)
@@ -100,7 +108,7 @@ async def test_recommend_passes_facets_through_and_omits_unset_knobs(fake):
     assert "n_runner_ups" not in payload
 
 
-async def test_recommend_renders_an_error_as_text(monkeypatch):
+async def test_recommend_renders_an_error_as_text(monkeypatch, logged_in):
     c = FakeClient(recommend_text={"_error": True, "_http_status": 503,
                                    "message": "no model bundle loaded"})
     monkeypatch.setattr(server, "_client", lambda: c)
@@ -109,7 +117,6 @@ async def test_recommend_renders_an_error_as_text(monkeypatch):
     assert out == "error: no model bundle loaded  (HTTP 503)"
 
 
-# -- describe: progressive disclosure ----------------------------------------
 async def test_describe_defaults_to_about(fake):
     await server.describe("brave_search")
     assert fake.last("describe")["sections"] == ["about"]
@@ -119,10 +126,9 @@ async def test_describe_forwards_the_route_relative_query(fake):
     await server.describe("brave_search", sections=["facets", "evidence"], query="q")
     payload = fake.last("describe")
     assert payload["sections"] == ["facets", "evidence"] and payload["query"] == "q"
-    assert payload["context"]["native_tools"]          # same baseline as the route it describes
+    assert payload["context"]["native_tools"]
 
 
-# -- the login gate ----------------------------------------------------------
 @pytest.mark.parametrize("call", [
     lambda: server.execute("brave_search", "q"),
     lambda: server.onboard("brave_search", "k"),
@@ -134,11 +140,18 @@ async def test_describe_forwards_the_route_relative_query(fake):
     lambda: server.fetch_result("ref"),
     lambda: server.my_tools(),
     lambda: server.my_tool_report(),
+    lambda: server.report_outcome("s-1", "brave_search", "full"),
 ])
 async def test_gated_tools_refuse_when_logged_out(monkeypatch, call):
     monkeypatch.setattr(server, "_session", Session())
     out = await call()
-    assert out["_error"] and "not logged in" in out["message"]
+    assert out["_error"] and "not logged in" in out["message"].lower()
+
+
+async def test_recommend_refuses_when_logged_out(fake, monkeypatch):
+    monkeypatch.setattr(server, "_session", Session())
+    out = await server.recommend("q")
+    assert out.startswith("STOP") and "login_link" in out and "use_token" in out
 
 
 async def test_execute_runs_once_logged_in(fake, logged_in):
@@ -157,11 +170,10 @@ async def test_a_401_forgets_the_cached_token(monkeypatch):
     assert not server._session.logged_in
 
 
-# -- session_info ------------------------------------------------------------
 async def test_session_info_surfaces_the_declared_baseline(fake, logged_in):
     info = await server.session_info()
     assert info["logged_in"] is True
-    assert info["api_key"] == "hyr_test"                       # short token: shown, not mangled
+    assert info["api_key"] == "hyr_test"
     assert info["mcp_client"] == "claude-code"
     assert info["native_tools"] == ["claude_code_opus_deep", "claude_code_sonnet_quick"]
 
@@ -173,7 +185,6 @@ async def test_session_info_masks_a_real_length_token(fake, monkeypatch):
     assert "0123456789abcdef" not in info["api_key"]
 
 
-# -- the token cache ---------------------------------------------------------
 def test_token_cache_round_trips_per_router():
     tokenstore.save("http://a.test", "hyr_a", "1", "a@x.io")
     tokenstore.save("http://b.test", "hyr_b", "2", "b@x.io")
@@ -191,10 +202,7 @@ def test_token_cache_is_private():
     assert mode == 0o600
 
 
-# -- the user's own tools ----------------------------------------------------
-
 async def test_private_tool_verbs_require_login(fake, monkeypatch):
-    """Every one is per-user state — none of them should reach the router unauthenticated."""
     monkeypatch.setattr(server, "_session", Session())
     for call in (server.my_tools(), server.my_tool_report(),
                  server.suggest_my_tool_regions("x"),
@@ -206,8 +214,6 @@ async def test_private_tool_verbs_require_login(fake, monkeypatch):
 
 
 async def test_declare_sends_the_users_sentence_verbatim(fake, logged_in):
-    """The trigger IS the declaration (specs/00): it goes to the router exactly as the user said
-    it, and nothing about the region path runs — a rule is not a place in capability space."""
     out = await server.declare_my_tool(
         "ivanspersonalVPN", ["use it whenever I need to do a vpn connect"])
     sent = fake.last("declare_private_tool")
@@ -219,17 +225,12 @@ async def test_declare_sends_the_users_sentence_verbatim(fake, logged_in):
 
 
 async def test_declare_without_a_trigger_asks_for_the_sentence(fake, logged_in):
-    """The router refuses a triggerless declaration; say so in terms of the MISSING FIELD.
-
-    Reported as a description problem, an agent rewords `description` forever against a wall it
-    cannot see — which is exactly what happened when the router moved to triggers ahead of us."""
     out = await server.declare_my_tool("ivanspersonalVPN", [], description="a vpn tool")
     assert out["_error"] is True and "triggers" in out["message"]
     assert not any(n == "declare_private_tool" for n, _ in fake.calls), "nothing should be declared"
 
 
 async def test_a_single_sentence_is_not_split_into_characters(fake, logged_in):
-    """A model asked for a list of sentences routinely sends one sentence."""
     await server.declare_my_tool("My Search", "always use it for research")
     assert fake.last("declare_private_tool")["triggers"] == ["always use it for research"]
 
@@ -242,7 +243,6 @@ async def test_capabilities_are_passed_through_as_report_wording_only(fake, logg
 
 
 async def test_a_description_that_maps_nowhere_still_declares(logged_in, monkeypatch):
-    """A poor anchor match must never block a declaration: anchors route nothing (specs/40)."""
     c = FakeClient(suggest_private_regions={"suggestions": [
         {"id": "hotel_search_booking", "label": "Hotel booking",
          "similarity": 0.1, "in_taxonomy": False}]})
@@ -294,15 +294,12 @@ async def test_instructions_teach_declaring_and_the_own_verdict():
     text = server.mcp.instructions or ""
     assert "declare_my_tool" in text
     assert "never declare one on your own initiative" in text
-    # the two honesty properties the surface must convey
     assert "CONDITIONAL" in text and "UNSCORED" in text
-    # the trigger model, not the retired region model
     assert "VERBATIM" in text and "context.situation" not in text
     assert "consider" in text
     assert "report_outcome` against the `__own__:" in text
 
 
-# -- preferred tools ---------------------------------------------------------
 async def test_preferred_tool_verbs_require_login(fake, monkeypatch):
     monkeypatch.setattr(server, "_session", Session())
     for call in (server.my_preferred_tools(), server.prefer_tool("kagi"),

@@ -1,40 +1,7 @@
-"""Declaring the native baseline — the coordinator this server runs inside.
-
-HyperRoute never assumes you have a coordinator. Its verdict for a task is one of:
-
-  * **interpose** — an external tool beats what you can already do, so route to it;
-  * **use_native** — nothing beats your own tools, so do it yourself.
-
-That comparison needs a baseline, and the baseline is the set of coordinators that are
-effectively free to the caller. An MCP server that does not say which coordinator it runs
-inside gives the router no baseline at all, so an external tool wins *every* time — including
-for tasks the coordinator does better itself. Declaring it is therefore not optional.
-
-Two independent ways to be effectively free, both sent on the `recommend` call's `context`:
-
-  * `native_tools` — **self-loopback**: the caller IS this coordinator. Zero marginal cost.
-  * `entitlements.held` — a **subscription** the user already pays for (e.g. `anthropic_max_5x`),
-    which also prices that tool at $0.
-
-Resolution order, first hit wins:
-
-  1. `HYPERROUTE_NATIVE_TOOLS` — explicit tool ids, e.g. to pin one model variant.
-  2. `HYPERROUTE_COORDINATOR` — a product name (`claude_code`, `codex`); `none`/`off` disables.
-  3. Auto-detect from the MCP client's own identity, sent on the protocol handshake.
-
-A product name resolves to concrete tool ids against the router's live catalog (fetched once
-per process, cached), so a new coordinator variant needs no release here. If detection finds
-nothing the declaration is simply omitted — routing still works, it just has no baseline.
-"""
-
 from __future__ import annotations
 
 from . import config
 
-# MCP client identity (as sent on the protocol handshake) -> the coordinator product it is.
-# Matched as a prefix on the lowercased, punctuation-normalized client name, longest first, so
-# "claude-code" wins over a bare "claude". Deliberately conservative: an unrecognized client
-# declares nothing rather than claiming capability it does not have.
 _CLIENT_PRODUCTS = {
     "claude_code": "claude_code",
     "codex": "codex",
@@ -47,12 +14,10 @@ _CLIENT_PRODUCTS = {
 
 _DISABLED = {"none", "off", "no", "false", "0"}
 
-# Resolved once per process: product name -> the coordinator tool ids the router models for it.
 _catalog_cache: dict[str, list[str]] | None = None
 
 
 def normalize_client(name: str | None) -> str:
-    """`Claude Code`, `claude-code`, `claude_code/1.2` -> `claude_code`."""
     if not name:
         return ""
     out = []
@@ -62,7 +27,6 @@ def normalize_client(name: str | None) -> str:
 
 
 def product_for_client(name: str | None) -> str | None:
-    """Which coordinator product an MCP client is, or None when we don't recognize it."""
     norm = normalize_client(name)
     if not norm:
         return None
@@ -77,18 +41,12 @@ def _match(tool_id: str, product: str) -> bool:
 
 
 async def coordinator_ids(client, product: str) -> list[str]:
-    """The router's tool ids for a coordinator product, read from its live catalog.
-
-    All of a product's variants are declared together: the coordinator can switch model or
-    depth mid-session, so the product — not one variant — is what the caller *is*. Pin a single
-    variant with `HYPERROUTE_NATIVE_TOOLS` when that matters.
-    """
     global _catalog_cache
     if _catalog_cache is None:
         cat = await client.catalog()
         tools = cat.get("tools") if isinstance(cat, dict) else None
         if not tools:
-            return []                                    # unreachable/empty catalog: declare nothing
+            return []
         by_product: dict[str, list[str]] = {}
         for t in tools:
             if t.get("kind") != "coordinator_agent":
@@ -102,16 +60,11 @@ async def coordinator_ids(client, product: str) -> list[str]:
 
 
 def reset_cache() -> None:
-    """Drop the cached catalog (tests; a router that swapped bundles mid-session)."""
     global _catalog_cache
     _catalog_cache = None
 
 
 async def declared_context(client, client_name: str | None) -> dict:
-    """The `context` fragment to merge into every route: what this caller already has.
-
-    Returns `{}` when nothing is known — no baseline, and the best external tool simply wins.
-    """
     setting = config.coordinator()
     if setting in _DISABLED:
         return {}
@@ -132,14 +85,6 @@ async def declared_context(client, client_name: str | None) -> dict:
 
 
 def merge_context(declared: dict, supplied: dict | None) -> dict | None:
-    """Merge the declaration UNDER a caller-supplied `context`.
-
-    `native_tools` and `entitlements.held` are **unioned, never dropped** — what the caller is, and
-    what it holds, are structural facts, so a per-call context adds to them rather than replacing
-    them. (Silently losing the declaration on a call that happened to pass a context is the exact
-    failure this whole module exists to prevent.) Every other key the caller passes wins outright.
-    To route with no baseline at all, disable the declaration itself: `HYPERROUTE_COORDINATOR=none`.
-    """
     caller = dict(supplied or {})
     if not declared and not caller:
         return None
@@ -157,5 +102,4 @@ def merge_context(declared: dict, supplied: dict | None) -> dict | None:
 
 
 def _union(*lists) -> list[str]:
-    """Order-preserving union — declaration first, caller's additions after."""
     return list(dict.fromkeys([x for lst in lists for x in (lst or [])]))

@@ -1,6 +1,6 @@
 [project]
 name = "hyperroute-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "MCP server for HyperRoute — routes each task to the best external tool and runs it for your coordinator agent."
 readme = "README.md"
 license = "MIT"
@@ -19,8 +19,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "mcp>=1.2.0",   # the Model Context Protocol Python SDK (FastMCP)
-    "httpx>=0.27",  # async HTTP client for the router surface
+    "mcp>=1.2.0",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -53,8 +53,11 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/conftest.py" = ["E402"]
