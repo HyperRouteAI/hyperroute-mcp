@@ -29,11 +29,13 @@ and what it will cost.
 
 ## Install
 
-Tell your coding agent:
+In Claude Code, type:
 
-> Run `uvx hyperroute-mcp@latest install` and follow it.
+```
+! uvx hyperroute-mcp@latest install
+```
 
-It registers HyperRoute with your agent, then asks you before changing anything else. Needs
+It adds HyperRoute to Claude Code and asks before changing anything else. Needs
 [uv](https://docs.astral.sh/uv/).
 
 **By hand.** Claude Code:

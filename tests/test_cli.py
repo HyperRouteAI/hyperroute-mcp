@@ -36,7 +36,7 @@ def test_install_in_claude_code_asks_before_hooks(monkeypatch, capsys):
     assert cli.main(["install"]) == 0
     out = capsys.readouterr().out
     assert "claude mcp add --scope user hyperroute --" in out
-    assert "ASK THE USER" in out and "install --apply" in out
+    assert "Yes: type  ! " in out and "install --apply" in out and len(out.splitlines()) <= 6
     assert not agents.claude_settings().exists()
 
 
@@ -47,7 +47,7 @@ def test_install_apply_then_remove(monkeypatch, capsys):
     assert set(hooks) == {"SessionStart", "SubagentStart", "PreToolUse"}
     capsys.readouterr()
     assert cli.main(["install"]) == 0
-    assert "already installed" in capsys.readouterr().out
+    assert "Restart Claude Code if" in capsys.readouterr().out
     assert cli.main(["install", "--remove"]) == 0
     assert json.loads(agents.claude_settings().read_text()) == {}
 
@@ -58,5 +58,4 @@ def test_already_registered_is_not_re_added(monkeypatch, sandbox, capsys):
     (sandbox / "claude" / ".claude.json").write_text(json.dumps(
         {"mcpServers": {"hr": {"command": "uvx", "args": ["hyperroute-mcp@latest"]}}}))
     cli.main(["install"])
-    assert 'already registered with Claude Code for all your projects (MCP server "hr")' in \
-        capsys.readouterr().out
+    assert "HyperRoute is already in Claude Code." in capsys.readouterr().out

@@ -10,7 +10,8 @@ from . import agents, install
 HELP = """hyperroute-mcp — HyperRoute for coding agents.
 
   hyperroute-mcp install            set up HyperRoute for the agent running this command
-  hyperroute-mcp install --apply    apply the setup the install step described
+  hyperroute-mcp install --apply    make the agent and its subagents use HyperRoute automatically
+  hyperroute-mcp install --details  show exactly what --apply changes
   hyperroute-mcp install --remove   undo the setup
   hyperroute-mcp --version          print the version
 
@@ -47,8 +48,7 @@ def _agent(argv: list[str]) -> str | None:
 
 def _register_claude() -> str:
     if agents.claude_user_server():
-        return f'HyperRoute is already registered with Claude Code for all your projects ' \
-               f'(MCP server "{agents.claude_user_server()}").'
+        return "HyperRoute is already in Claude Code."
     claude = shutil.which("claude")
     cmd = ["claude", "mcp", "add", "--scope", "user", "hyperroute", "--", *_launch()]
     if not claude:
@@ -57,43 +57,33 @@ def _register_claude() -> str:
     if r.returncode != 0:
         return ("Could not register HyperRoute with Claude Code automatically. Run:\n  "
                 + " ".join(cmd) + "\n" + (r.stderr or r.stdout).strip()[-400:])
-    return 'HyperRoute is now registered with Claude Code for all your projects (MCP server "hyperroute").'
+    return "HyperRoute is added to Claude Code."
 
 
 def _claude_install(argv: list[str]) -> int:
     block = "--block-web" in argv
     if "--remove" in argv:
         out = agents.claude_remove()
-        print("Removed HyperRoute's hooks from " + out["file"] + "." if out["removed"]
-              else "Nothing to remove.")
+        print("HyperRoute's hooks are removed." if out["removed"] else "Nothing to remove.")
         return 0
     if "--apply" in argv:
-        plan = agents.claude_apply(block_web=block, cwd=os.getcwd())
-        print("Done. HyperRoute's hooks are in " + plan["file"] + ".")
-        print("Restart Claude Code (or run /mcp) so HyperRoute and its hooks load. "
-              "HyperRoute asks for a login the first time an account is needed.")
+        agents.claude_apply(block_web=block, cwd=os.getcwd())
+        print("Done. Restart Claude Code to start using HyperRoute.")
         return 0
     print(_register_claude())
     plan = agents.claude_plan(block_web=block, cwd=os.getcwd())
     pending = [s for s in plan["steps"] if s["state"] != "installed"]
+    if "--details" in argv:
+        for s in plan["steps"]:
+            print(f"  [{s['state']}] {s['what']} ({s['hook']} in {s['file']})")
     if not pending:
-        print("Its hooks are already installed. Nothing else to do.")
-        print("If HyperRoute's tools are not loaded yet, restart Claude Code (or run /mcp).")
+        print("Restart Claude Code if its HyperRoute tools are not loaded yet.")
         return 0
+    apply = _self("install", "--apply", *(["--block-web"] if block else []))
     print()
-    print("One more step makes Claude Code, and every subagent it starts, use HyperRoute "
-          "automatically.")
-    print(f"It adds {len(pending)} hook(s) to {plan['file']}:")
-    for n, s in enumerate(pending, 1):
-        print(f"  {n}. {s['what']}")
-    print(f"Nothing else changes, and `{_self('install', '--remove')}` undoes it.")
-    print()
-    print('ASK THE USER: "Add these hooks so Claude Code and its subagents use HyperRoute '
-          'automatically? (yes/no)"')
-    print(f"  yes -> run: {_self('install', '--apply', *(['--block-web'] if block else []))}")
-    print("  no  -> done; HyperRoute still works when the user asks for it by name.")
-    print()
-    print("Then tell the user to restart Claude Code (or run /mcp) so HyperRoute loads.")
+    print(f"Should Claude Code and its subagents use it automatically? (adds {len(pending)} hooks; undo anytime)")
+    print(f"Yes: type  ! {apply}")
+    print("Then restart Claude Code.")
     return 0
 
 
