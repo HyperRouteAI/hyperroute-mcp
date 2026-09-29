@@ -5,6 +5,8 @@ import json
 import os
 import re
 import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 from . import install
@@ -233,6 +235,76 @@ def claude_new_pieces() -> list[str]:
     have = (install.load_record()["agents"].get("claude_code") or {}).get("pieces") or {}
     return sorted(p for p in CLAUDE_PIECES
                   if p not in have or (have[p] or {}).get("rev", 1) < REVISIONS[p])
+
+
+LABELS = {"codex": "Codex", "opencode": "OpenCode"}
+
+
+def _codex_home() -> Path:
+    p = os.environ.get("CODEX_HOME")
+    return Path(p).expanduser() if p else Path.home() / ".codex"
+
+
+def _codex_registered() -> bool:
+    try:
+        text = (_codex_home() / "config.toml").read_text()
+    except Exception:
+        return False
+    return bool(re.search(r"^\[mcp_servers\.[^\]]+\][^\[]*hyperroute", text, re.M | re.S))
+
+
+def _opencode_file() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME")
+    root = Path(base).expanduser() if base else Path.home() / ".config"
+    return root / "opencode" / "opencode.json"
+
+
+def register(product: str, launch: list[str]) -> str | None:
+    if product == "codex":
+        if _codex_registered():
+            return None
+        codex = shutil.which("codex")
+        cmd = ["codex", "mcp", "add", "hyperroute", "--", *launch]
+        if not codex:
+            return "Register HyperRoute with Codex by running:\n  " + " ".join(cmd)
+        r = subprocess.run([codex, *cmd[1:]], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return "Could not register HyperRoute with Codex. Run:\n  " + " ".join(cmd)
+        return None
+    if product == "opencode":
+        path = _opencode_file()
+        data = _read_json(path) if path.exists() else {}
+        if path.exists() and not data:
+            try:
+                if path.read_text().strip():
+                    return f"Could not read {path}; add an MCP server named hyperroute that runs `{' '.join(launch)}`."
+            except Exception:
+                pass
+        data.setdefault("$schema", "https://opencode.ai/config.json")
+        mcp = data.setdefault("mcp", {})
+        mcp["hyperroute"] = {"type": "local", "command": list(launch), "enabled": True}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        return None
+    return f"No installer for {product}."
+
+
+def unregister(product: str) -> bool:
+    if product == "codex":
+        codex = shutil.which("codex")
+        if not codex or not _codex_registered():
+            return False
+        return subprocess.run([codex, "mcp", "remove", "hyperroute"], capture_output=True, timeout=60).returncode == 0
+    if product == "opencode":
+        path = _opencode_file()
+        data = _read_json(path)
+        if not (data.get("mcp") or {}).pop("hyperroute", None):
+            return False
+        if not data["mcp"]:
+            data.pop("mcp")
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        return True
+    return False
 
 
 OPTIONS = {
