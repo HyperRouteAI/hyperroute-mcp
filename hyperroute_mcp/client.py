@@ -131,9 +131,9 @@ class HyperRouteClient:
         return await self._request("POST", "/onboard", auth=True,
                                    json={"tool_id": tool_id, "api_key": api_key, "label": label})
 
-    async def execute(self, tool_id: str, query: str) -> Any:
+    async def execute(self, tool_id: str, query: str, session_id: str | None = None) -> Any:
         return await self._request("POST", "/execute", auth=True,
-                                   json={"tool_id": tool_id, "query": query}, tag=True,
+                                   json={"tool_id": tool_id, "query": query, "session_id": session_id}, tag=True,
                                    timeout=config.execute_timeout())
 
     async def read_result(self, ref: str, op: str, offset: int, limit: int,

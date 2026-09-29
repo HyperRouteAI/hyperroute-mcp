@@ -59,8 +59,8 @@ class FakeClient:
         self._record("describe", payload)
         return self.answers.get("describe", {"tool_id": payload["tool_id"]})
 
-    async def execute(self, tool_id, query):
-        self._record("execute", {"tool_id": tool_id, "query": query})
+    async def execute(self, tool_id, query, session_id=None):
+        self._record("execute", {"tool_id": tool_id, "query": query, "session_id": session_id})
         return self.answers.get("execute", {"result": "ok"})
 
     async def console(self, view, user_id):

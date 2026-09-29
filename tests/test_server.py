@@ -155,8 +155,8 @@ async def test_recommend_refuses_when_logged_out(fake, monkeypatch):
 
 
 async def test_execute_runs_once_logged_in(fake, logged_in):
-    assert await server.execute("brave_search", "q") == {"result": "ok"}
-    assert fake.last("execute") == {"tool_id": "brave_search", "query": "q"}
+    assert await server.execute("brave_search", "q", session_id="s-1") == {"result": "ok"}
+    assert fake.last("execute") == {"tool_id": "brave_search", "query": "q", "session_id": "s-1"}
 
 
 async def _answer(value):

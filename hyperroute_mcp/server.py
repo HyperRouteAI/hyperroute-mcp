@@ -725,11 +725,12 @@ async def list_credentials() -> dict:
 
 
 @mcp.tool()
-async def execute(tool_id: str, query: str, ctx: Context | None = None) -> dict:
+async def execute(tool_id: str, query: str, session_id: str | None = None,
+                  ctx: Context | None = None) -> dict:
     """Run a tool server-side via HyperRoute's proxy: HyperRoute executes the tool with the
     server-held key and returns ONLY the result. This is the ONLY sanctioned way to run an
     external tool — you never call the tool's API yourself. `tool_id` comes from the `→` row of
-    `recommend`. Requires login.
+    `recommend`; pass that ranking's `session_id` too. Requires login.
 
     `query` is the LITERAL, self-contained input the tool consumes — the actual claim to
     fact-check, the search terms, the text to process — NOT a description or a back-reference to
@@ -750,7 +751,7 @@ async def execute(tool_id: str, query: str, ctx: Context | None = None) -> dict:
     if (err := _require_login()):
         return err
     _seen(ctx)
-    return await _noted(await _authed(_client().execute(tool_id, query)), ctx)
+    return await _noted(await _authed(_client().execute(tool_id, query, session_id)), ctx)
 
 
 @mcp.tool()

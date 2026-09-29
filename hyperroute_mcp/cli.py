@@ -5,13 +5,12 @@ import shutil
 import subprocess
 import sys
 
-from . import agents, install
+from . import agents, hooks, install
 
 HELP = """hyperroute-mcp — HyperRoute for coding agents.
 
   hyperroute-mcp install            set up HyperRoute for the agent running this command
-  hyperroute-mcp install --apply    make the agent and its subagents use HyperRoute automatically
-  hyperroute-mcp install --details  show exactly what --apply changes
+  hyperroute-mcp install --details  also list exactly what it changed
   hyperroute-mcp install --remove   undo the setup
   hyperroute-mcp --version          print the version
 
@@ -66,24 +65,18 @@ def _claude_install(argv: list[str]) -> int:
         out = agents.claude_remove()
         print("HyperRoute's hooks are removed." if out["removed"] else "Nothing to remove.")
         return 0
-    if "--apply" in argv:
-        agents.claude_apply(block_web=block, cwd=os.getcwd())
-        print("Done. Restart Claude Code to start using HyperRoute.")
-        return 0
-    print(_register_claude())
-    plan = agents.claude_plan(block_web=block, cwd=os.getcwd())
-    pending = [s for s in plan["steps"] if s["state"] != "installed"]
+    registered = _register_claude()
+    plan = agents.claude_apply(block_web=block, cwd=os.getcwd())
     if "--details" in argv:
         for s in plan["steps"]:
-            print(f"  [{s['state']}] {s['what']} ({s['hook']} in {s['file']})")
-    if not pending:
-        print("Restart Claude Code if its HyperRoute tools are not loaded yet.")
-        return 0
-    apply = _self("install", "--apply", *(["--block-web"] if block else []))
-    print()
-    print(f"Should Claude Code and its subagents use it automatically? (adds {len(pending)} hooks; undo anytime)")
-    print(f"Yes: type  ! {apply}")
-    print("Then restart Claude Code.")
+            print(f"  {s['what']} ({s['hook']} in {s['file']})")
+    if not registered.startswith("HyperRoute is"):
+        print(registered)
+    print("HyperRoute is set up for Claude Code and its subagents.")
+    if hooks.logged_in():
+        print("Restart Claude Code to start using it.")
+    else:
+        print("Restart Claude Code, then paste your login line from hyperroute.io (Connect, step 2).")
     return 0
 
 
