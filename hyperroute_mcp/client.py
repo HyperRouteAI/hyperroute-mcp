@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -19,6 +20,10 @@ class Session:
     @property
     def logged_in(self) -> bool:
         return bool(self.api_key)
+
+
+def _seg(value: Any) -> str:
+    return quote(str(value), safe="")
 
 
 def _unwrap(r: httpx.Response) -> Any:
@@ -99,7 +104,7 @@ class HyperRouteClient:
     async def catalog(self) -> Any:
         return await self._request("GET", "/console", params={"view": "tools", "format": "json"})
     async def onboard_info(self, tool_id: str) -> Any:
-        return await self._request("GET", f"/onboard/{tool_id}", auth=True)
+        return await self._request("GET", f"/onboard/{_seg(tool_id)}", auth=True)
     async def onboard(self, tool_id: str, api_key: str, label: str | None) -> Any:
         return await self._request("POST", "/onboard", auth=True,
                                    json={"tool_id": tool_id, "api_key": api_key, "label": label})
@@ -109,7 +114,7 @@ class HyperRouteClient:
                                    timeout=config.execute_timeout())
     async def read_result(self, ref: str, op: str, offset: int, limit: int,
                           path: list | None, query: str | None) -> Any:
-        return await self._request("POST", f"/result/{ref}/read", auth=True,
+        return await self._request("POST", f"/result/{_seg(ref)}/read", auth=True,
                                    json={"op": op, "offset": offset, "limit": limit,
                                          "path": path, "query": query})
     async def report_outcome(self, payload: dict) -> Any:
@@ -133,9 +138,9 @@ class HyperRouteClient:
     async def declare_private_tool(self, payload: dict) -> Any:
         return await self._request("PUT", "/private-tools", auth=True, json=payload)
     async def update_private_tool(self, tool_id: str, payload: dict) -> Any:
-        return await self._request("PATCH", f"/private-tools/{tool_id}", auth=True, json=payload)
+        return await self._request("PATCH", f"/private-tools/{_seg(tool_id)}", auth=True, json=payload)
     async def delete_private_tool(self, tool_id: str, project_id: str | None = None) -> Any:
-        return await self._request("DELETE", f"/private-tools/{tool_id}", auth=True,
+        return await self._request("DELETE", f"/private-tools/{_seg(tool_id)}", auth=True,
                                    params={"project_id": project_id})
     async def list_preferred_tools(self, project_id: str | None = None) -> Any:
         return await self._request("GET", "/preferred-tools", auth=True,
@@ -143,5 +148,5 @@ class HyperRouteClient:
     async def prefer_tool(self, payload: dict) -> Any:
         return await self._request("PUT", "/preferred-tools", auth=True, json=payload)
     async def delete_preferred_tool(self, tool_id: str, project_id: str | None = None) -> Any:
-        return await self._request("DELETE", f"/preferred-tools/{tool_id}", auth=True,
+        return await self._request("DELETE", f"/preferred-tools/{_seg(tool_id)}", auth=True,
                                    params={"project_id": project_id})

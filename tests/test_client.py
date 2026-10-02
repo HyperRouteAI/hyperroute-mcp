@@ -152,3 +152,12 @@ async def test_execute_waits_longer_than_other_calls(monkeypatch):
     await c.execute("brave_search", "q")
     await c.health()
     assert seen[-2] >= 900 and seen[-1] == 30
+
+
+async def test_path_arguments_stay_in_their_segment(patched):
+    t = patched(httpx.Response(200, json={}))
+    c = HyperRouteClient("http://router.test", Session("hyr_x"))
+    await c.read_result("../auth/tokens#", "slice", 0, 10, None, None)
+    assert t.request.url.raw_path == b"/result/..%2Fauth%2Ftokens%23/read"
+    await c.onboard_info("__own__:a/b")
+    assert t.request.url.raw_path == b"/onboard/__own__%3Aa%2Fb"
