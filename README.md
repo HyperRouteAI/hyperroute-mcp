@@ -3,29 +3,10 @@
 The official [Model Context Protocol](https://modelcontextprotocol.io) server for
 **[HyperRoute](https://hyperroute.io)**.
 
-HyperRoute is a router for AI agents. Give it a task and it picks the best external tool for
-*that* task — measured, not advertised — then runs the tool for you with your own key held
-server-side, and learns from how it went. This MCP server is how a coordinator agent (Claude
-Code, Codex, Goose, Cursor, LangGraph, …) drives it:
-
-> recommend → onboard a key → execute the tool server-side → report the outcome
-
-It talks to the router only over its public HTTP API and holds no product logic of its own.
-
-## Why route at all
-
-An agent with 100 tools bolted on has a context problem and a quality problem. HyperRoute
-replaces both with one verb: your agent learns `recommend`, and HyperRoute decides which of
-hundreds of tools actually answers this task, whether you can already do it better yourself,
-and what it will cost.
-
-- **Measured, not advertised.** Every capability score is backed by real graded probes you can
-  inspect (`describe(tool_id, ["evidence"])`).
-- **Your keys never leave the server.** You connect a key once; HyperRoute runs the tool with it
-  and returns only the result. The key is never sent to your agent, never logged.
-- **It tells you when NOT to route.** If nothing beats what your coordinator already does, the
-  verdict is `use_native` — do it yourself. That only works if the server knows which coordinator
-  it runs inside; see [Your coordinator](#your-coordinator).
+MCP server for [HyperRoute](https://hyperroute.io), a tool router for AI agents. A coordinator
+agent (Claude Code, Codex, OpenCode, …) calls `recommend` for an outside task, runs the pick with
+`execute` (the tool runs on HyperRoute's server with the user's stored key), and reports the result
+with `report_outcome`. The server talks to the router over its public HTTP API only.
 
 ## Install
 
@@ -35,9 +16,11 @@ In your coding agent, type:
 ! uvx -q hyperroute-mcp@latest install
 ```
 
-It adds HyperRoute to Claude Code, with hooks so the agent and its subagents use it; `install --remove`
-undoes the hooks. Needs
-[uv](https://docs.astral.sh/uv/).
+It adds HyperRoute to Claude Code with hooks: the routing rules at session and subagent start, a
+guard that blocks the agent's own outside calls (web search and fetch, network commands, other MCP
+servers) until HyperRoute has ranked the lookup, and an end-of-turn check for unreported runs.
+`install --remind-only` makes the guard remind instead of block; `install --remove` undoes the
+hooks. Needs [uv](https://docs.astral.sh/uv/).
 
 **By hand.** Claude Code:
 
@@ -64,8 +47,8 @@ The login is saved and reused in every later session.
 
 ## Your coordinator
 
-HyperRoute compares external tools against what your coordinator can already do. The server reads
-which coordinator launched it and declares it for you; `session_info` shows what it resolved.
+HyperRoute compares external tools against what the coordinator can already do. The server reads
+which coordinator launched it and declares it; `session_info` shows what it resolved.
 
 ## Tools
 
@@ -109,7 +92,7 @@ pytest
 ruff check .
 ```
 
-The suite is fully offline — the router is faked, so no network and no real account are touched.
+The suite is offline: the router is faked.
 
 ### Environment variables
 
@@ -125,6 +108,7 @@ None are needed against the hosted router. For development and self-hosting:
 | `HYPERROUTE_COORDINATOR` | auto-detect | Coordinator override; `none` disables. |
 | `HYPERROUTE_NATIVE_TOOLS` | — | Exact coordinator tool ids. |
 | `HYPERROUTE_HELD` | — | Comma-separated plan groups you hold. |
+| `HYPERROUTE_GUARD` | block | `remind` makes the Claude Code guard remind instead of block. |
 
 ## License
 
