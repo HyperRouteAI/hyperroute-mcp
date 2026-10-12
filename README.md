@@ -4,8 +4,7 @@
 [HyperRoute](https://hyperroute.io), a tool router for AI agents. A coordinator
 agent (Claude Code, Codex, OpenCode, …) calls `recommend` for an outside task, runs the pick with
 `execute` (the tool runs on HyperRoute's server with the user's stored key), and reports the result
-with `report_outcome`. It calls the same public API as the SDK (https://hyperroute.io); no
-routing logic runs inside the MCP.
+with `report_outcome`.
 
 ## Install
 
