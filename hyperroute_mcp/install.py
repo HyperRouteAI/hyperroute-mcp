@@ -79,33 +79,6 @@ def note_router(header: str | None) -> None:
             _router[k] = v.strip()
 
 
-CLEARANCE_SECONDS = 600
-_SELF_VERDICTS = (re.compile(r"^verdict:\s*(use_native|use_own)\b", re.M),
-                  re.compile(r"^kind:\s*(NO_TOOL|ADVISORY)\b", re.M))
-
-
-def clearance_path() -> Path:
-    return home() / "clearance.json"
-
-
-def note_verdict(text: str) -> str | None:
-    if not isinstance(text, str):
-        return None
-    for rx in _SELF_VERDICTS:
-        m = rx.search(text)
-        if m:
-            try:
-                _write(clearance_path(), {"verdict": m.group(1), "until": time.time() + CLEARANCE_SECONDS})
-            except Exception:
-                pass
-            return m.group(1)
-    return None
-
-
-def cleared() -> bool:
-    return time.time() < _read(clearance_path()).get("until", 0)
-
-
 def router_versions() -> dict:
     return dict(_router)
 

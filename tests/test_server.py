@@ -54,6 +54,13 @@ async def test_instructions_carry_the_hard_rule_and_the_native_exception():
         assert word in text
 
 
+
+async def test_native_verdict_follows_the_measured_instruction():
+    text = server.mcp.instructions or ""
+    assert "`instruction:`" in text and "`prompt:`" in text and "`alternative:`" in text
+    tool = next(t for t in await server.mcp.list_tools() if t.name == "recommend")
+    assert "`instruction:`" in (tool.description or "")
+
 class _Info:
     def __init__(self, name):
         self.name = name
@@ -337,9 +344,40 @@ async def test_setup_plans_then_removes(fake, logged_in, monkeypatch, tmp_path):
     monkeypatch.setenv("HYPERROUTE_HOME", str(tmp_path / "hr"))
     monkeypatch.setattr(server, "_product", lambda ctx: "claude_code")
     plan = await server.setup()
-    assert plan["changes"] == 3 and "apply=true" in plan["next"]
+    assert plan["changes"] == 4 and "apply=true" in plan["next"]
     done = await server.setup(apply=True, confirmed=True)
     assert done["applied"] is True and done["approved_by"] == "chat"
     assert (await server.setup(remove=True))["would_remove"]
     assert sorted((await server.setup(remove=True, apply=True))["removed"]) == [
-        "session-start", "subagent-start", "web-guard"]
+        "report-check", "session-start", "subagent-start", "web-guard"]
+
+
+async def test_an_unreported_run_holds_the_next_route_and_run(fake, logged_in):
+    assert await server.execute("brave_search", "q", session_id="s-1") == {"result": "ok"}
+    held = await server.recommend("next lookup")
+    assert held.startswith("REPORT FIRST") and "brave_search" in held
+    assert (await server.execute("brave_search", "q2"))["error"] == "report_first"
+    await server.report_outcome("s-1", "brave_search", "full")
+    assert not (await server.recommend("next lookup")).startswith("REPORT FIRST")
+
+
+async def test_a_refused_execute_owes_no_report(monkeypatch, logged_in):
+    c = FakeClient(execute={"error": "needs_onboard", "message": "connect a key"})
+    monkeypatch.setattr(server, "_client", lambda: c)
+    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
+    await server.execute("omdb", "Inception")
+    assert not (await server.recommend("next")).startswith("REPORT FIRST")
+
+
+async def test_a_handed_back_recommend_grants_a_pass(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    c = FakeClient(recommend_text="session: s-9\nverdict: use_native  (use your own tools)\nact: x")
+    monkeypatch.setattr(server, "_client", lambda: c)
+    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
+    await server.recommend("latest version of the npm package react")
+    assert ledger.take_pass("https://registry.npmjs.org/react/latest")
+    assert not ledger.take_pass("https://registry.npmjs.org/react/latest")
+
+
+async def test_instructions_open_with_the_rules():
+    assert server._INSTRUCTIONS.startswith("# HyperRoute — mandatory routing")

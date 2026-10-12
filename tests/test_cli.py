@@ -40,7 +40,7 @@ def test_install_in_claude_code_does_it_all(monkeypatch, capsys):
     assert "HyperRoute is set up for Claude Code and its subagents." in out
     assert "paste your login line" in out
     hooks = json.loads(agents.claude_settings().read_text())["hooks"]
-    assert set(hooks) == {"SessionStart", "SubagentStart", "PreToolUse"}
+    assert set(hooks) == {"SessionStart", "SubagentStart", "PreToolUse", "Stop"}
 
 
 def test_install_twice_then_remove(monkeypatch, capsys):

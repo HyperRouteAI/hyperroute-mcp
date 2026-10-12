@@ -98,7 +98,7 @@ confidence: med (on the pick)
 act: execute('opencitations', <query>)
 ```
 
-`use`: `ready` (run it) · `needs_key` (connect a key first) · `native` (the agent does it itself) ·
+`use`: `ready` (run it) · `needs_key` (connect a key first) · `native` (the agent does it itself, following the `instruction:` line) ·
 `own` (your own tool) · `soon` (not runnable yet).
 
 ## Development

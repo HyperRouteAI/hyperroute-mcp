@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from hyperroute_mcp import agents, hooks, install
+from hyperroute_mcp import agents, hooks, install, ledger
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,8 @@ def test_router_header_wins_for_latest():
     assert install.router_versions()["min"] == "0.1.0"
 
 
-def test_hook_outputs():
+def test_hook_outputs(monkeypatch):
+    monkeypatch.setattr(hooks, "logged_in", lambda: True)
     s = hooks.output("session-start", ["--server", "hr"])
     assert s["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "mcp__hr__recommend" in s["hookSpecificOutput"]["additionalContext"]
@@ -44,7 +45,7 @@ def test_hook_outputs():
 
 def test_plan_changes_nothing():
     plan = agents.claude_plan()
-    assert [s["state"] for s in plan["steps"]] == ["add", "add", "add"]
+    assert [s["state"] for s in plan["steps"]] == ["add", "add", "add", "add"]
     assert not agents.claude_settings().exists()
 
 
@@ -61,13 +62,15 @@ def test_apply_keeps_user_hooks_and_is_idempotent():
     assert mine in starts and len(starts) == 2
     assert len(s["hooks"]["SubagentStart"]) == 1
     guard = s["hooks"]["PreToolUse"][0]
-    assert guard["matcher"] == agents.CLAUDE_PIECES["web-guard"][1] and "--block" not in guard["hooks"][0]["command"]
+    assert guard["matcher"] == agents.CLAUDE_PIECES["web-guard"][1] and "--block" in guard["hooks"][0]["command"]
+    assert "hook report-check" in s["hooks"]["Stop"][0]["hooks"][0]["command"]
     assert all(st["state"] == "installed" for st in agents.claude_plan()["steps"])
     assert set(install.load_record()["agents"]["claude_code"]["pieces"]) == set(agents.CLAUDE_PIECES)
 
 
 def test_block_option_updates_in_place():
-    agents.claude_apply()
+    agents.claude_apply(block_web=False)
+    assert "--block" not in _settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     agents.claude_apply(block_web=True)
     guards = _settings()["hooks"]["PreToolUse"]
     assert len(guards) == 1 and "--block" in guards[0]["hooks"][0]["command"]
@@ -94,7 +97,7 @@ def test_repair_fixes_approved_pieces_only(monkeypatch):
     s = _settings()
     assert "PreToolUse" not in s.get("hooks", {})
     assert s["hooks"]["SessionStart"][0]["hooks"][0]["command"].startswith("/new/python")
-    assert agents.claude_new_pieces() == ["web-guard"]
+    assert agents.claude_new_pieces() == ["report-check", "web-guard"]
 
 
 def test_server_name_read_from_claude_json(sandbox):
@@ -119,18 +122,68 @@ def test_outside_calls(payload, expected):
     assert hooks.outside(payload, "hyperroute") is expected
 
 
-def test_self_verdict_clears_the_guard():
-    blocked = hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch"})
-    assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert install.note_verdict("session: s\nverdict: use_native  (use your own tools)\nact: x") == "use_native"
-    assert hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch"}) is None
-    assert hooks.output("web-guard", [], {"tool_name": "Bash",
-                                          "tool_input": {"command": "curl https://x.io"}}) is None
+@pytest.fixture
+def logged(monkeypatch):
+    monkeypatch.setattr(hooks, "logged_in", lambda: True)
 
 
-def test_kind_lines_clear_too():
-    assert install.note_verdict("session: s\nkind:    NO_TOOL — nothing here\nact: x") == "NO_TOOL"
-    assert install.note_verdict("session: s\nverdict: interpose\nact: execute(...)") is None
+def _deny(out):
+    return bool(out) and out["hookSpecificOutput"].get("permissionDecision") == "deny"
+
+
+def test_hook_rules_are_the_tested_wording():
+    text = hooks.output("session-start", ["--server", "hr"])["hookSpecificOutput"]["additionalContext"]
+    assert "CRITICAL FAILURE" in text and "mcp__hr__recommend" in text
+    assert "one `recommend` covering two items of a list" in text
+
+
+def test_a_handed_back_lookup_lets_one_call_for_that_lookup_through(logged):
+    fetch = {"tool_name": "WebFetch", "tool_input": {"url": "https://pypi.org/pypi/httpx/json"}}
+    assert _deny(hooks.output("web-guard", ["--block"], fetch))
+    assert ledger.handed_back("session: s\nverdict: use_native  (use your own tools)\nact: x")
+    ledger.grant_pass("latest released version of the Python package httpx")
+    other = {"tool_name": "WebFetch", "tool_input": {"url": "https://registry.npmjs.org/react"}}
+    assert _deny(hooks.output("web-guard", ["--block"], other))
+    assert hooks.output("web-guard", ["--block"], fetch) is None
+    assert _deny(hooks.output("web-guard", ["--block"], fetch))
+
+
+def test_kind_lines_hand_back_too():
+    assert ledger.handed_back("session: s\nkind:    NO_TOOL — nothing here\nact: x")
+    assert not ledger.handed_back("session: s\nverdict: interpose\nact: execute(...)")
+
+
+def test_guard_never_blocks_when_logged_out_or_hyperroute_is_down(monkeypatch, logged):
+    search = {"tool_name": "WebSearch", "tool_input": {"query": "x"}}
+    ledger.note_outage()
+    assert hooks.output("web-guard", ["--block"], search) is None
+    monkeypatch.setattr(ledger, "in_outage", lambda: False)
+    monkeypatch.setattr(hooks, "logged_in", lambda: False)
+    out = hooks.output("web-guard", ["--block"], search)
+    assert not _deny(out) and "not logged in" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_guard_remind_only_by_env(monkeypatch, logged):
+    monkeypatch.setenv("HYPERROUTE_GUARD", "remind")
+    assert not _deny(hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch"}))
+
+
+def test_report_check_holds_the_turn_until_every_run_is_reported():
+    assert hooks.output("report-check", []) is None
+    ledger.add_run("nws_weather", "s-1")
+    ledger.add_run("nws_weather", "s-1")
+    first = hooks.output("report-check", [])
+    assert first["decision"] == "block" and "nws_weather" in first["reason"]
+    ledger.clear_run("nws_weather", "s-1")
+    assert hooks.output("report-check", [])["decision"] == "block"
+    ledger.clear_run("nws_weather", "s-1")
+    assert hooks.output("report-check", []) is None
+
+
+def test_report_check_lets_go_after_repeated_refusals():
+    ledger.add_run("nominatim", "s-2")
+    outs = [hooks.output("report-check", []) for _ in range(hooks.STOP_BLOCKS + 1)]
+    assert all(o for o in outs[:-1]) and outs[-1] is None
 
 
 def test_widened_piece_needs_fresh_consent(monkeypatch):
@@ -141,7 +194,7 @@ def test_widened_piece_needs_fresh_consent(monkeypatch):
     assert agents.claude_new_pieces() == ["web-guard"]
     monkeypatch.setattr(install, "hook_command", lambda name, *a: ["/moved/python", "-m",
                                                                    "hyperroute_mcp", "hook", name, *a])
-    assert agents.claude_repair() == ["session-start", "subagent-start"]
+    assert agents.claude_repair() == ["report-check", "session-start", "subagent-start"]
 
 
 def test_hooks_say_log_in_first_when_logged_out(monkeypatch):
@@ -151,3 +204,11 @@ def test_hooks_say_log_in_first_when_logged_out(monkeypatch):
     monkeypatch.setattr(hooks, "logged_in", lambda: True)
     s = hooks.output("session-start", [])["hookSpecificOutput"]["additionalContext"]
     assert "not logged in" not in s
+
+
+def test_the_pass_most_about_the_call_is_spent():
+    ledger.grant_pass("httpx security advisories")
+    ledger.grant_pass("httpx async and HTTP/2 support docs")
+    assert ledger.take_pass("https://www.python-httpx.org/async/ http2 support")
+    left = ledger.load()["passes"]
+    assert len(left) == 1 and "advisories" in left[0]["words"]

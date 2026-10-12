@@ -101,7 +101,8 @@ def _register_claude() -> str:
 
 
 def _claude_install(argv: list[str]) -> int:
-    block = "--block-web" in argv
+    # The guard blocks by default; --remind-only keeps the reminder-only guard.
+    block = agents.BLOCK_DEFAULT and "--remind-only" not in argv or "--block-web" in argv
     if "--remove" in argv:
         out = agents.claude_remove()
         print("HyperRoute's hooks are removed." if out["removed"] else "Nothing to remove.")

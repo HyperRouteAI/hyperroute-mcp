@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import install
 
-HOOK_MARK = re.compile(r"hyperroute[-_]mcp\S*\s+hook\s+(session-start|subagent-start|web-guard)\b")
+HOOK_MARK = re.compile(r"hyperroute[-_]mcp\S*\s+hook\s+(session-start|subagent-start|web-guard|report-check)\b")
 
 CLAUDE_PIECES = {
     "session-start": ("SessionStart", None,
@@ -22,10 +22,14 @@ CLAUDE_PIECES = {
     "web-guard": ("PreToolUse", "WebSearch|WebFetch|Bash|mcp__.*",
                   "When the agent reaches outside the machine on its own (web search or fetch, a "
                   "network command in the shell, another MCP server), remind it to route through "
-                  "HyperRoute. Local work is untouched, and after HyperRoute says to use its own "
-                  "tools it stays quiet for 10 minutes."),
+                  "HyperRoute. Local work is untouched, and when HyperRoute tells it to do a lookup "
+                  "itself, that one call goes through quietly."),
+    "report-check": ("Stop", None,
+                     "When the agent is about to finish while a tool HyperRoute ran has no report "
+                     "yet, ask it to send the report first (at most five times in a row)."),
 }
-REVISIONS = {"session-start": 1, "subagent-start": 1, "web-guard": 2}
+REVISIONS = {"session-start": 1, "subagent-start": 1, "web-guard": 2, "report-check": 1}
+BLOCK_DEFAULT = True
 
 
 def _fingerprint(s: str) -> str:
@@ -153,7 +157,7 @@ def _add(settings: dict, piece: str, command: str) -> dict:
     return settings
 
 
-def claude_plan(block_web: bool = False, cwd: str | None = None) -> dict:
+def claude_plan(block_web: bool = BLOCK_DEFAULT, cwd: str | None = None) -> dict:
     path = claude_settings()
     settings = _read_json(path)
     present = _installed(settings)
@@ -170,16 +174,17 @@ def claude_plan(block_web: bool = False, cwd: str | None = None) -> dict:
         d = desc
         if piece == "web-guard" and block_web:
             d = ("Block the agent from reaching outside the machine on its own (web search or fetch, a "
-                 "network command in the shell, another MCP server), telling it to route through "
-                 "HyperRoute. Local work is untouched, and after HyperRoute says to use its own "
-                 "tools it is let through for 10 minutes.")
+                 "network command in the shell, another MCP server) until HyperRoute has ranked that "
+                 "lookup. Local work is untouched; when HyperRoute tells it to do a lookup itself, "
+                 "that one call goes through; while you are not logged in, or HyperRoute cannot be "
+                 "reached, it only reminds.")
         steps.append({"piece": piece, "state": state, "what": d,
                       "file": str(path), "hook": event + (f" ({matcher})" if matcher else ""),
                       "command": want})
     return {"agent": "claude_code", "server": server, "file": str(path), "steps": steps}
 
 
-def claude_apply(block_web: bool = False, cwd: str | None = None,
+def claude_apply(block_web: bool = BLOCK_DEFAULT, cwd: str | None = None,
                  pieces: set[str] | None = None) -> dict:
     plan = claude_plan(block_web, cwd)
     pieces = pieces or set(CLAUDE_PIECES)

@@ -22,6 +22,11 @@ def _offline_versions(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HYPERROUTE_HOME", str(tmp_path / "home"))
+
+
+@pytest.fixture(autouse=True)
 def _clean_native_cache():
     native.reset_cache()
     yield
@@ -74,6 +79,10 @@ class FakeClient:
     async def execute(self, tool_id, query, session_id=None):
         self._record("execute", {"tool_id": tool_id, "query": query, "session_id": session_id})
         return self.answers.get("execute", {"result": "ok"})
+
+    async def report_outcome(self, payload):
+        self._record("report_outcome", payload)
+        return self.answers.get("report_outcome", {"ok": True})
 
     async def console(self, view, user_id):
         self._record("console", {"view": view, "user_id": user_id})

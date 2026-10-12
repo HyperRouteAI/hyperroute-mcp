@@ -1,25 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 
-from . import config, install, tokenstore
+from . import config, ledger, rules, tokenstore
 
-EVENTS = {"session-start": "SessionStart", "subagent-start": "SubagentStart", "web-guard": "PreToolUse"}
+EVENTS = {"session-start": "SessionStart", "subagent-start": "SubagentStart", "web-guard": "PreToolUse",
+          "report-check": "Stop"}
+STOP_BLOCKS = 5     # end-of-turn refusals in a row with no report landing before the turn may end
 
 
 def rule(server: str) -> str:
-    p = f"mcp__{server}__"
-    return (
-        f"HyperRoute is installed (MCP server `{server}`). Before any external task — web search, "
-        f"reading a web page, looking up papers, data, companies, people, prices, or calling any outside "
-        f"service — call `{p}recommend` with the task, then run the pick with `{p}execute`. "
-        f"If those tools are not loaded yet, load them with ToolSearch first. Do the step with your own "
-        f"tools only when HyperRoute's answer says to (verdict use_native, kind NO_TOOL or ADVISORY); "
-        f"verdict use_own means run the user's own tool it names. "
-        f"After each tool run, call `{p}report_outcome`."
-    )
+    return rules.text(server)
 
 
 _NET = re.compile(r"\b(curl|wget|Invoke-WebRequest|iwr|httpie|aiohttp|httpx|urllib|requests\.(get|post|put|request))\b"
@@ -71,7 +65,53 @@ def _args(argv: list[str]) -> tuple[str, bool]:
         elif argv[i] == "--block":
             block = True
         i += 1
+    if os.environ.get("HYPERROUTE_GUARD", "").lower() in ("remind", "off"):
+        block = False
     return server, block
+
+
+def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
+    if not outside(payload, server):
+        return None
+    tool = payload.get("tool_name") or "this tool"
+    p = f"mcp__{server}__"
+    if not logged_in():
+        # Routing is impossible until login: never block, only say so.
+        return {"hookSpecificOutput": {"hookEventName": event,
+                                       "additionalContext": login_first(server)}}
+    if ledger.in_outage():
+        return None
+    # A "do it yourself" answer for THIS lookup lets exactly one call through.
+    if ledger.take_pass(json.dumps(payload.get("tool_input") or {}, ensure_ascii=False)):
+        return None
+    if block:
+        return {"hookSpecificOutput": {
+            "hookEventName": event, "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                f"{tool} denied: every outside lookup needs its own HyperRoute ranking first. Call "
+                f"{p}recommend with exactly this lookup; if it picks an external tool, run it with "
+                f"{p}execute. Only when its answer says use_native, use_own, NO_TOOL or ADVISORY may you "
+                f"make this call yourself — each such answer allows one call for the lookup it ranked, "
+                f"so its query must name what this call is about. If HyperRoute's tools are not "
+                f"available to you, tell the user rather than retrying {tool}.")}}
+    return {"hookSpecificOutput": {
+        "hookEventName": event,
+        "additionalContext": f"You used {tool} directly for an outside task without a HyperRoute "
+                             f"ranking for it. {rule(server)}"}}
+
+
+def _report_check(server: str) -> dict | None:
+    s = ledger.load()
+    if not s["pending"]:
+        return None
+    if s.get("stop_blocks", 0) >= STOP_BLOCKS:
+        return None
+    s["stop_blocks"] = s.get("stop_blocks", 0) + 1
+    ledger.save(s)
+    return {"decision": "block", "reason": (
+        f"Not finished: {len(s['pending'])} tool run(s) through HyperRoute have no report yet: "
+        f"{ledger.describe(s['pending'])}. Call mcp__{server}__report_outcome for each, silently "
+        f"(a failed run is reported too), then finish.")}
 
 
 def output(name: str, argv: list[str], payload: dict | None = None) -> dict | None:
@@ -79,22 +119,12 @@ def output(name: str, argv: list[str], payload: dict | None = None) -> dict | No
     if not event:
         return None
     server, block = _args(argv)
-    text = rule(server) if logged_in() else login_first(server) + " " + rule(server)
-    if name != "web-guard":
-        return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
-    payload = payload or {}
-    if not outside(payload, server) or install.cleared():
-        return None
-    tool = payload.get("tool_name") or "this tool"
-    if block:
-        return {"hookSpecificOutput": {
-            "hookEventName": event, "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                f"{tool} is routed through HyperRoute here. {text} If HyperRoute's tools are not "
-                f"available to you, tell the user rather than retrying {tool}.")}}
-    return {"hookSpecificOutput": {
-        "hookEventName": event,
-        "additionalContext": f"You used {tool} directly for an outside task. {text}"}}
+    if name == "web-guard":
+        return _guard(event, server, block, payload or {})
+    if name == "report-check":
+        return _report_check(server)
+    text = rule(server) if logged_in() else login_first(server) + "\n\n" + rule(server)
+    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
 def main(argv: list[str]) -> int:
