@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 from . import config, ledger, rules, tokenstore
 
@@ -20,6 +21,46 @@ _NET = re.compile(r"\b(curl|wget|Invoke-WebRequest|iwr|httpie|aiohttp|httpx|urll
                   r"|https?://", re.I)
 _URL = re.compile(r"https?://([^/\s:'\"]+)", re.I)
 _LOCAL = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"}
+# Work on the user's own things: their repos, their packages, their storage, their containers.
+_OWN_WORK = {"git", "gh", "npm", "npx", "pnpm", "yarn", "bun", "pip", "pip3", "uv", "uvx", "poetry",
+             "pipx", "conda", "cargo", "go", "brew", "apt", "apt-get", "dnf", "docker", "podman",
+             "kubectl", "helm", "ssh", "scp", "rsync", "aws", "gcloud", "gsutil", "az", "make"}
+_SEGMENT = re.compile(r"&&|\|\||[;|\n]")
+_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Connectors to the user's own accounts (drive, docs, mail, chat) that the agent app provides.
+_ACCOUNT_PREFIXES = ("claude_ai_",)
+
+
+def _program(segment: str) -> str:
+    words = [w for w in segment.strip().split() if not _ASSIGN.match(w)]
+    while words and words[0] in ("sudo", "env", "/usr/bin/env", "time", "nohup", "exec"):
+        words = words[1:]
+    return os.path.basename(words[0]) if words else ""
+
+
+def _net_segment(segment: str) -> bool:
+    if _program(segment) in _OWN_WORK or not _NET.search(segment):
+        return False
+    hosts = {h.lower() for h in _URL.findall(segment)}
+    return not hosts or not hosts <= _LOCAL
+
+
+def _mcp_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name)
+
+
+def remote_servers(cwd: str | None = None) -> set[str]:
+    """MCP servers the agent reaches over the network, by their tool-prefix name."""
+    from . import agents
+    data = agents._read_json(agents._claude_json())
+    blocks = [agents._servers(data)]
+    projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
+    if cwd and isinstance(projects.get(cwd), dict):
+        blocks.append(agents._servers(projects[cwd]))
+    if cwd:
+        blocks.append(agents._servers(agents._read_json(Path(cwd) / ".mcp.json")))
+    return {_mcp_name(name) for servers in blocks for name, spec in servers.items()
+            if isinstance(spec, dict) and (spec.get("type") in ("http", "sse") or spec.get("url"))}
 
 
 def outside(payload: dict, server: str) -> bool:
@@ -27,13 +68,14 @@ def outside(payload: dict, server: str) -> bool:
     if tool in ("WebSearch", "WebFetch"):
         return True
     if tool.startswith("mcp__"):
-        return not tool.startswith(f"mcp__{server}__")
+        name = tool[len("mcp__"):].split("__", 1)[0]
+        if name == server or name.startswith(_ACCOUNT_PREFIXES):
+            return False
+        # A local server, or one of the agent app's own tools, is the user's own machine.
+        return name in remote_servers(payload.get("cwd"))
     if tool == "Bash":
         cmd = str((payload.get("tool_input") or {}).get("command") or "")
-        if not _NET.search(cmd):
-            return False
-        hosts = {h.lower() for h in _URL.findall(cmd)}
-        return not hosts or not hosts <= _LOCAL
+        return any(_net_segment(s) for s in _SEGMENT.split(cmd))
     return False
 
 
@@ -96,8 +138,8 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
                 f"available to you, tell the user rather than retrying {tool}.")}}
     return {"hookSpecificOutput": {
         "hookEventName": event,
-        "additionalContext": f"You used {tool} directly for an outside task without a HyperRoute "
-                             f"ranking for it. {rule(server)}"}}
+        "additionalContext": f"You used {tool} directly for an outside lookup without a HyperRoute "
+                             f"ranking for it; the next one gets its own {p}recommend first."}}
 
 
 def _report_check(server: str) -> dict | None:

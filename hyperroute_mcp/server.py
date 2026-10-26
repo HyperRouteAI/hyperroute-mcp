@@ -74,7 +74,8 @@ line telling you what to do next. The `use` column is the whole auth story in on
                   says so and `connect:` lines carry the signup URL and steps: show them, ask the
                   user for the key, `onboard(tool, key)`, then `execute`. Never do the task with
                   your own tools instead — that hides "you need a key" behind an answer. If `act:`
-                  points at a different, ready row, run that one.
+                  points at a tool the user already has (a ready row, your own tools, their own
+                  tool), do what it says.
   • `native`    — the first exception above: do it yourself, as the `instruction:` line says.
   • `own`       — the second: the user's own declared tool. Run it with the access you already
                   have; never `execute` it and never ask for a key.

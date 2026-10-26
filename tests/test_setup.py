@@ -38,6 +38,7 @@ def test_hook_outputs(monkeypatch):
     assert sub["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
     remind = hooks.output("web-guard", [], {"tool_name": "WebSearch"})
     assert "permissionDecision" not in remind["hookSpecificOutput"]
+    assert "CRITICAL FAILURE" not in remind["hookSpecificOutput"]["additionalContext"]
     block = hooks.output("web-guard", ["--block"], {"tool_name": "WebFetch"})
     assert block["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert hooks.output("nope", []) is None
@@ -110,16 +111,40 @@ def test_server_name_read_from_claude_json(sandbox):
 
 @pytest.mark.parametrize("payload,expected", [
     ({"tool_name": "WebSearch"}, True),
-    ({"tool_name": "mcp__github__search_code"}, True),
     ({"tool_name": "mcp__hyperroute__execute"}, False),
+    ({"tool_name": "mcp__ccd_turn__update_plan"}, False),
+    ({"tool_name": "mcp__claude-in-chrome__navigate"}, False),
+    ({"tool_name": "mcp__claude_ai_Claude_Docs__batch"}, False),
+    ({"tool_name": "mcp__claude_ai_Google_Drive__search"}, False),
+    ({"tool_name": "mcp__teamboard__send"}, False),
     ({"tool_name": "Bash", "tool_input": {"command": "curl -s https://api.coingecko.com/x"}}, True),
     ({"tool_name": "Bash", "tool_input": {"command": "python3 -c 'import requests; requests.get(u)'"}}, True),
     ({"tool_name": "Bash", "tool_input": {"command": "curl -s http://localhost:8077/health"}}, False),
     ({"tool_name": "Bash", "tool_input": {"command": "pytest -q && git status"}}, False),
+    ({"tool_name": "Bash", "tool_input": {"command": "cd ~/core && git pull https://github.com/me/core"}}, False),
+    ({"tool_name": "Bash", "tool_input": {"command": "npm install pptxgenjs"}}, False),
+    ({"tool_name": "Bash", "tool_input": {"command": "sudo pip install https://x.org/p.whl"}}, False),
+    ({"tool_name": "Bash", "tool_input": {"command": "git fetch && curl -s https://example.com"}}, True),
     ({"tool_name": "Read", "tool_input": {"file_path": "/x"}}, False),
 ])
 def test_outside_calls(payload, expected):
     assert hooks.outside(payload, "hyperroute") is expected
+
+
+def test_only_remote_mcp_servers_are_outside(sandbox):
+    (sandbox / "claude").mkdir()
+    (sandbox / "claude" / ".claude.json").write_text(json.dumps({
+        "mcpServers": {"exa": {"type": "http", "url": "https://mcp.exa.ai/mcp"},
+                       "files": {"command": "npx", "args": ["fs-server"]}},
+        "projects": {"/w": {"mcpServers": {"search.io": {"type": "sse", "url": "https://s.io"}}}}}))
+    (sandbox / "w").mkdir()
+    (sandbox / "w" / ".mcp.json").write_text(json.dumps(
+        {"mcpServers": {"pages": {"url": "https://pages.dev/mcp"}}}))
+    assert hooks.outside({"tool_name": "mcp__exa__web_search"}, "hyperroute")
+    assert not hooks.outside({"tool_name": "mcp__files__read"}, "hyperroute")
+    assert hooks.outside({"tool_name": "mcp__search_io__q", "cwd": "/w"}, "hyperroute")
+    assert not hooks.outside({"tool_name": "mcp__search_io__q", "cwd": "/other"}, "hyperroute")
+    assert hooks.outside({"tool_name": "mcp__pages__get", "cwd": str(sandbox / "w")}, "hyperroute")
 
 
 @pytest.fixture
