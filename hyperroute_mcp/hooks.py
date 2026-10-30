@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import config, ledger, rules, tokenstore
+from . import config, install, ledger, rules, tokenstore
 
 EVENTS = {"session-start": "SessionStart", "subagent-start": "SubagentStart", "web-guard": "PreToolUse",
           "report-check": "Stop"}
@@ -112,6 +112,70 @@ def _args(argv: list[str]) -> tuple[str, bool]:
     return server, block
 
 
+ROUTE_TIMEOUT = 6.0
+NATIVE_TTL = 86400
+
+
+def _lookup(payload: dict) -> str:
+    """The attempted call as a lookup the router can rank."""
+    tool = payload.get("tool_name") or ""
+    inp = payload.get("tool_input") or {}
+    if tool == "WebSearch":
+        return str(inp.get("query") or "")
+    if tool == "WebFetch":
+        return f"{inp.get('prompt') or 'fetch'} {inp.get('url') or ''}".strip()
+    if tool == "Bash":
+        return str(inp.get("command") or "")[:400]
+    return f"{tool} {json.dumps(inp, ensure_ascii=False)}"[:400]
+
+
+def _native_ids(base: str) -> list[str]:
+    """Claude Code's coordinator ids from the live catalog, cached a day: the hook runs per call."""
+    import time
+
+    import httpx
+    path = install.home() / "state" / "native_ids.json"
+    try:
+        c = json.loads(path.read_text())
+        if c.get("base") == base and time.time() - c.get("at", 0) < NATIVE_TTL:
+            return c["ids"]
+    except Exception:
+        pass
+    r = httpx.get(f"{base}/console", params={"view": "tools", "format": "json"}, timeout=3)
+    ids = sorted(t["id"] for t in (r.json().get("tools") or [])
+                 if t.get("kind") == "coordinator_agent" and str(t.get("id", "")).startswith("claude_code"))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"base": base, "at": time.time(), "ids": ids}))
+    except Exception:
+        pass
+    return ids
+
+
+def _route(query: str) -> str | None:
+    """Rank the attempted call (the min text wire), or None when the router cannot answer."""
+    import httpx
+    base = config.base_url()
+    key = config.preset_api_key() or (tokenstore.load(base) or {}).get("api_key")
+    try:
+        ctx = {"native_tools": _native_ids(base)}
+        r = httpx.post(f"{base}/recommend", timeout=ROUTE_TIMEOUT,
+                       headers={"authorization": f"Bearer {key}"} if key else {},
+                       json={"query": query, "detail": "min", "format": "text", "context": ctx})
+    except Exception:
+        ledger.note_outage()
+        return None
+    return r.text if r.is_success else None
+
+
+def _best(text: str) -> tuple[str, str]:
+    for line in text.splitlines():
+        if line.startswith("→ "):
+            cols = [c for c in re.split(r"\s{2,}", line[2:].strip()) if c]
+            return cols[0], (cols[-1] if len(cols) > 4 else "")
+    return "", ""
+
+
 def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
     if not outside(payload, server):
         return None
@@ -126,6 +190,19 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
     # A "do it yourself" answer for THIS lookup lets exactly one call through.
     if ledger.take_pass(json.dumps(payload.get("tool_input") or {}, ensure_ascii=False)):
         return None
+    if block and not config.classic_verbs():
+        # One-call mode: rank this very call. The agent's own tool best → it goes through, silently.
+        text = _route(_lookup(payload))
+        if text is None and ledger.in_outage():
+            return None
+        if text is not None and ledger.handed_back(text):
+            return None
+        best, why = _best(text or "")
+        better = f"{best} is better for this" + (f" ({why.rstrip('.')})" if why else "") if best else \
+            "this lookup needs a HyperRoute ranking"
+        return {"hookSpecificOutput": {
+            "hookEventName": event, "permissionDecision": "deny",
+            "permissionDecisionReason": f"{tool} stopped: {better}. Send it via {p}run."}}
     if block:
         return {"hookSpecificOutput": {
             "hookEventName": event, "permissionDecision": "deny",
@@ -136,10 +213,10 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
                 f"make this call yourself — each such answer allows one call for the lookup it ranked, "
                 f"so its query must name what this call is about. If HyperRoute's tools are not "
                 f"available to you, tell the user rather than retrying {tool}.")}}
+    nxt = f"{p}recommend" if config.classic_verbs() else f"{p}run"
     return {"hookSpecificOutput": {
         "hookEventName": event,
-        "additionalContext": f"You used {tool} directly for an outside lookup without a HyperRoute "
-                             f"ranking for it; the next one gets its own {p}recommend first."}}
+        "additionalContext": f"{tool} used without HyperRoute; send the next outside lookup via {nxt}."}}
 
 
 def _report_check(server: str) -> dict | None:
@@ -150,10 +227,14 @@ def _report_check(server: str) -> dict | None:
         return None
     s["stop_blocks"] = s.get("stop_blocks", 0) + 1
     ledger.save(s)
+    if config.classic_verbs():
+        return {"decision": "block", "reason": (
+            f"Not finished: {len(s['pending'])} tool run(s) through HyperRoute have no report yet: "
+            f"{ledger.describe(s['pending'])}. Call mcp__{server}__report_outcome for each, silently "
+            f"(a failed run is reported too), then finish.")}
     return {"decision": "block", "reason": (
-        f"Not finished: {len(s['pending'])} tool run(s) through HyperRoute have no report yet: "
-        f"{ledger.describe(s['pending'])}. Call mcp__{server}__report_outcome for each, silently "
-        f"(a failed run is reported too), then finish.")}
+        f"Unreported: {ledger.describe(s['pending'])}. Score each with "
+        f"mcp__{server}__report_outcome(item=…), silently, then finish.")}
 
 
 def output(name: str, argv: list[str], payload: dict | None = None) -> dict | None:

@@ -2,9 +2,9 @@
 
 [Model Context Protocol](https://modelcontextprotocol.io) server for
 [HyperRoute](https://hyperroute.io), a tool router for AI agents. A coordinator
-agent (Claude Code, Codex, OpenCode, …) calls `recommend` for an outside task, runs the pick with
-`execute` (the tool runs on HyperRoute's server with the user's stored key), and reports the result
-with `report_outcome`.
+agent (Claude Code, Codex, OpenCode, …) sends its outside lookups with `run`: each is ranked on its
+own and the best tool runs on HyperRoute's server with the user's stored key. Items marked for it
+get a score back.
 
 ## Install
 
@@ -52,8 +52,8 @@ which coordinator launched it and declares it; `session_info` shows what it reso
 
 | Tool | What it does |
 |---|---|
-| `recommend` | Task → ranked tools and how to act. |
-| `execute` | Run the chosen tool with your connected key; returns the result. |
+| `run` | Lookups → each ranked on its own; clear picks run, results back; owed reports ride along. |
+| `ranking` | The full ranking behind one run item (and the evidence, on request). |
 | `connect_info` / `onboard` | A tool's signup steps; save and test its API key. |
 | `report_outcome` / `report_narrative` | Feedback on a call, or on a whole run. |
 | `describe` | One tool's details: `about` · `price` · `facets` · `evidence`. |
@@ -65,22 +65,20 @@ which coordinator launched it and declares it; `session_info` shows what it reso
 | `session_info` / `setup` | Connection, login and versions; set up, check, upgrade or remove. |
 | `use_token` / `login` | Log in. |
 
-A ranking looks like:
+A run reply looks like:
 
 ```
-session: s-6d6c5a95f9f84d9a
-verdict: interpose
-
-  tool              name                        price  use        why
-→ opencitations     OpenCitations Index         free   ready      highest-ranked: capability 0.81 …
-  semantic_scholar  Semantic Scholar Graph API  free   needs_key  lower capability (0.75 vs 0.81).
-
-confidence: med (on the pick)
-act: execute('opencitations', <query>)
+run r_7f3a
+[1] frankfurter [settled, conf high; report if wrong]
+  {"date":"2023-01-02","rates":{"JPY":130.92}}
+[2] do it yourself
+[3] needs a key: sonar_deep_research is best. STOP; ask the user (signup https://…)
+  1. Create an account …
+  then onboard('sonar_deep_research', <key>) and resend this item
+owed: r_7f3a/4 → reports=[{item, score}] on next run
 ```
 
-`use`: `ready` (run it) · `needs_key` (connect a key first) · `native` (the agent does it itself, following the `instruction:` line) ·
-`own` (your own tool) · `soon` (not runnable yet).
+`HYPERROUTE_MCP_VERBS=classic` exposes `recommend` + `execute` instead (the web demo's agent uses it).
 
 ## Development
 
@@ -107,6 +105,7 @@ None are needed against the hosted router. For development and self-hosting:
 | `HYPERROUTE_NATIVE_TOOLS` | — | Exact coordinator tool ids. |
 | `HYPERROUTE_HELD` | — | Comma-separated plan groups you hold. |
 | `HYPERROUTE_GUARD` | block | `remind` makes the Claude Code guard remind instead of block. |
+| `HYPERROUTE_MCP_VERBS` | `run` | `classic`: `recommend` + `execute` instead of `run` + `ranking`. |
 
 ## License
 

@@ -29,11 +29,15 @@ def test_router_header_wins_for_latest():
     assert install.router_versions()["min"] == "0.1.0"
 
 
+_EXA = "session: s\nverdict: interpose\n\n→ exa  Exa  free  ready  best for this."
+
+
 def test_hook_outputs(monkeypatch):
     monkeypatch.setattr(hooks, "logged_in", lambda: True)
+    monkeypatch.setattr(hooks, "_route", lambda q: _EXA)
     s = hooks.output("session-start", ["--server", "hr"])
     assert s["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "mcp__hr__recommend" in s["hookSpecificOutput"]["additionalContext"]
+    assert "mcp__hr__run" in s["hookSpecificOutput"]["additionalContext"]
     sub = hooks.output("subagent-start", [])
     assert sub["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
     remind = hooks.output("web-guard", [], {"tool_name": "WebSearch"})
@@ -150,6 +154,7 @@ def test_only_remote_mcp_servers_are_outside(sandbox):
 @pytest.fixture
 def logged(monkeypatch):
     monkeypatch.setattr(hooks, "logged_in", lambda: True)
+    monkeypatch.setattr(hooks, "_route", lambda q: _EXA)
 
 
 def _deny(out):
@@ -158,8 +163,31 @@ def _deny(out):
 
 def test_hook_rules_are_the_tested_wording():
     text = hooks.output("session-start", ["--server", "hr"])["hookSpecificOutput"]["additionalContext"]
-    assert "CRITICAL FAILURE" in text and "mcp__hr__recommend" in text
-    assert "one `recommend` covering two items of a list" in text
+    assert "CRITICAL FAILURE" in text and "mcp__hr__run" in text
+    assert "Never two lookups in one item" in text and "recommend" not in text
+
+
+def test_guard_lets_the_agents_own_tool_through_when_it_is_best(logged, monkeypatch):
+    seen = []
+    monkeypatch.setattr(hooks, "_route", lambda q: seen.append(q) or
+                        "session: s\nverdict: use_native  (use your own tools)\nact: x")
+    search = {"tool_name": "WebSearch", "tool_input": {"query": "react 19 release notes"}}
+    assert hooks.output("web-guard", ["--block"], search) is None
+    assert seen == ["react 19 release notes"]                  # the call itself was ranked
+
+
+def test_guard_names_the_better_tool(logged):
+    out = hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch", "tool_input": {"query": "x"}})
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason == "WebSearch stopped: exa is better for this (best for this). Send it via mcp__hyperroute__run."
+
+
+def test_guard_allows_when_the_router_is_down(logged, monkeypatch):
+    def down(q):
+        ledger.note_outage()
+        return None
+    monkeypatch.setattr(hooks, "_route", down)
+    assert hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch", "tool_input": {"query": "x"}}) is None
 
 
 def test_a_handed_back_lookup_lets_one_call_for_that_lookup_through(logged):

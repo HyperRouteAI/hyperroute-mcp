@@ -137,9 +137,10 @@ def ran(out) -> bool:
     return out.get("error") not in _NOT_RUN and not out.get("login_required")
 
 
-def add_run(tool_id: str, session_id: str | None) -> None:
+def add_run(tool_id: str, session_id: str | None, item: str | None = None, high: bool = False) -> None:
     s = load()
-    s["pending"].append({"tool_id": tool_id, "session_id": session_id, "at": time.time()})
+    s["pending"].append({"tool_id": tool_id, "session_id": session_id, "item": item, "high": high,
+                         "at": time.time()})
     s["stop_blocks"] = 0
     save(s)
 
@@ -156,9 +157,17 @@ def clear_run(tool_id: str, session_id: str | None) -> None:
     save(s)
 
 
+def clear_item(item: str) -> None:
+    s = load()
+    s["pending"] = [r for r in s["pending"] if r.get("item") != item]
+    s["stop_blocks"] = 0
+    save(s)
+
+
 def pending(key: str | None = None) -> list[dict]:
     return load(key)["pending"]
 
 
 def describe(runs: list[dict]) -> str:
-    return ", ".join(f"{r['tool_id']} (session {r.get('session_id') or '?'})" for r in runs)
+    return ", ".join(f"{r['item']} ({r['tool_id']})" if r.get("item") else
+                     f"{r['tool_id']} (session {r.get('session_id') or '?'})" for r in runs)

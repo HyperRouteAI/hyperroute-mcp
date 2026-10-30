@@ -5,7 +5,7 @@ from hyperroute_mcp.client import Session
 
 from .conftest import FakeClient
 
-TOOLS = {"session_info", "setup", "use_token", "login", "recommend", "describe", "execute", "onboard",
+TOOLS = {"session_info", "setup", "use_token", "login", "run", "ranking", "describe", "onboard",
          "connect_info", "report_outcome", "report_narrative", "get_preferences", "set_preferences",
          "fetch_result", "console", "my_tools", "declare_my_tool", "update_my_tool", "remove_my_tool",
          "my_preferred_tools", "prefer_tool", "unprefer_tool"}
@@ -46,7 +46,7 @@ async def test_every_tool_is_registered():
 
 
 async def test_instructions_carry_the_hard_rule_and_the_native_exception():
-    text = server.mcp.instructions or ""
+    text = server._INSTRUCTIONS                                   # the demo's classic wording
     assert "NEVER permitted to perform an external task on your own" in text
     assert "use_native" in text
     assert "use_own" in text
@@ -56,10 +56,9 @@ async def test_instructions_carry_the_hard_rule_and_the_native_exception():
 
 
 async def test_native_verdict_follows_the_measured_instruction():
-    text = server.mcp.instructions or ""
+    text = server._INSTRUCTIONS
     assert "`instruction:`" in text and "`prompt:`" in text and "`alternative:`" in text
-    tool = next(t for t in await server.mcp.list_tools() if t.name == "recommend")
-    assert "`instruction:`" in (tool.description or "")
+    assert "`instruction:`" in (server.recommend.__doc__ or "")
 
 class _Info:
     def __init__(self, name):
@@ -291,7 +290,7 @@ async def test_my_tools_carries_the_own_report(fake, logged_in):
 
 
 async def test_instructions_teach_declaring_and_the_own_verdict():
-    text = server.mcp.instructions or ""
+    text = server._INSTRUCTIONS
     assert "declare_my_tool" in text
     assert "never declare one on your own initiative" in text
     assert "CONDITIONAL" in text and "UNSCORED" in text
@@ -333,7 +332,7 @@ async def test_unprefer_and_list(fake, logged_in):
 
 
 async def test_instructions_teach_preferring_and_the_passed_over_line():
-    text = server.mcp.instructions or ""
+    text = server._INSTRUCTIONS
     assert "prefer_tool" in text and "Never prefer a tool on your own initiative" in text
     assert "passed over" in text and "MARGIN" in text
 
@@ -357,7 +356,7 @@ async def test_an_unreported_run_holds_the_next_route_and_run(fake, logged_in):
     held = await server.recommend("next lookup")
     assert held.startswith("REPORT FIRST") and "brave_search" in held
     assert (await server.execute("brave_search", "q2"))["error"] == "report_first"
-    await server.report_outcome("s-1", "brave_search", "full")
+    await server.report_outcome("full", session_id="s-1", tool_id="brave_search")
     assert not (await server.recommend("next lookup")).startswith("REPORT FIRST")
 
 
@@ -381,3 +380,63 @@ async def test_a_handed_back_recommend_grants_a_pass(monkeypatch, logged_in):
 
 async def test_instructions_open_with_the_rules():
     assert server._INSTRUCTIONS.startswith("# HyperRoute — mandatory routing")
+    assert (server.mcp.instructions or "").startswith("# HyperRoute: hard rules")
+
+
+async def test_run_instructions_are_short():
+    text = server.mcp.instructions or ""
+    assert "run" in text and "declare_my_tool" in text and "prefer_tool" in text
+    assert len(text) < len(server._INSTRUCTIONS) / 3
+
+
+def _run_answer(items, run="r_1", reports=None):
+    return {"run": run, "items": items, "reports": reports, "text": f"run {run}"}
+
+
+async def test_run_sends_items_and_returns_the_text(monkeypatch, logged_in):
+    c = FakeClient(run=_run_answer([{"action": "run", "tool": "exa", "session_id": "s1",
+                                     "report": "on_failure", "stakes": "commodity"}]))
+    monkeypatch.setattr(server, "_client", lambda: c)
+    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
+    out = await server.run(["usd to jpy on 2023-01-02", {"query": "eiffel tower coordinates", "facets": None}])
+    sent = c.last("run")
+    assert sent["items"] == [{"query": "usd to jpy on 2023-01-02"}, {"query": "eiffel tower coordinates"}]
+    assert sent["context"]["native_tools"]
+    assert out == "run r_1"
+    from hyperroute_mcp import ledger
+    assert ledger.pending() == []                               # on_failure owes nothing
+
+
+async def test_an_owed_report_rides_the_next_run_and_high_stakes_hold(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    c = FakeClient(run=_run_answer([{"action": "run", "tool": "factcheck", "session_id": "s1",
+                                     "report": "always", "stakes": "high"}]))
+    monkeypatch.setattr(server, "_client", lambda: c)
+    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
+    await server.run(["is the moon landing faked"])
+    assert [r["item"] for r in ledger.pending()] == ["r_1/1"]
+    held = await server.run(["next"])
+    assert held.startswith("REPORT FIRST") and "r_1/1" in held
+    c.answers["run"] = _run_answer([], run="r_2", reports={"accepted": 1, "failed": []})
+    await server.run(["next"], reports=[{"item": "r_1/1", "score": "full"}])
+    assert c.last("run")["reports"] == [{"item": "r_1/1", "score": "full"}]
+    assert ledger.pending() == []
+
+
+async def test_report_outcome_by_item(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    ledger.add_run("exa", "s1", item="r_1/2")
+    c = FakeClient(run={"run": "r_9", "items": [], "reports": {"accepted": 1, "failed": []}})
+    monkeypatch.setattr(server, "_client", lambda: c)
+    assert await server.report_outcome("partial", item="r_1/2", reason="missing_data") == {"ok": True}
+    assert c.last("run") == {"reports": [{"item": "r_1/2", "score": "partial", "reason": "missing_data"}]}
+    assert ledger.pending() == []
+
+
+async def test_a_do_yourself_item_grants_a_pass(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    c = FakeClient(run=_run_answer([{"action": "do_yourself", "query": "latest react version"}]))
+    monkeypatch.setattr(server, "_client", lambda: c)
+    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
+    await server.run(["latest react version"])
+    assert ledger.take_pass('{"query": "react latest version"}')

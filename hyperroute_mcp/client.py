@@ -99,6 +99,12 @@ class HyperRouteClient:
         return await self._request("POST", "/recommend", auth=True,
                                    json={**payload, "detail": "min", "format": "text"},
                                    as_text=True, tag=True)
+    async def run(self, payload: dict) -> Any:
+        return await self._request("POST", "/run", auth=True, json=payload, tag=True,
+                                   timeout=config.execute_timeout())
+    async def ranking(self, run: str, item: int, evidence: bool = False) -> Any:
+        return await self._request("POST", "/ranking", auth=True, as_text=not evidence,
+                                   json={"run": run, "item": item, "evidence": evidence})
     async def describe(self, payload: dict) -> Any:
         return await self._request("POST", "/describe", auth=True, json=payload)
     async def catalog(self) -> Any:

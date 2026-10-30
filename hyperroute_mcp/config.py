@@ -44,3 +44,9 @@ def native_tools() -> list[str]:
 
 def held_plans() -> list[str]:
     return _csv("HYPERROUTE_HELD")
+
+
+def classic_verbs() -> bool:
+    """`HYPERROUTE_MCP_VERBS=classic` exposes recommend + execute instead of run. Only the web demo
+    sets it: its ranking box reads those two calls. Everything else uses run."""
+    return (os.environ.get("HYPERROUTE_MCP_VERBS") or "").strip().lower() == "classic"
