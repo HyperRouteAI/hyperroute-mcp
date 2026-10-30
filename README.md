@@ -32,6 +32,21 @@ then ask the agent to *"finish HyperRoute setup"*. Any other MCP client:
 { "mcpServers": { "hyperroute": { "command": "uvx", "args": ["hyperroute-mcp@latest"] } } }
 ```
 
+## Web apps and workflow tools
+
+Claude (web, desktop, mobile), ChatGPT and other apps that connect to a remote MCP server by URL use
+the hosted endpoint:
+
+```
+https://hyperroute.io/mcp
+```
+
+Add it as a custom connector and sign in with your HyperRoute account when asked. Tools that send a
+fixed header instead (n8n's MCP Client node, any HTTP MCP client) send a `hyr_…` token from
+[hyperroute.io](https://hyperroute.io) as `Authorization: Bearer hyr_…`. The hosted endpoint has the
+same tools minus `setup`, `use_token` and `login` (the app signs you in; nothing is installed), and
+no hooks.
+
 ## Setup, checks and upgrades
 
 Ask your agent to set up, check, upgrade or remove HyperRoute; it calls `setup`, shows you what it
@@ -62,8 +77,9 @@ which coordinator launched it and declares it; `session_info` shows what it reso
 | `console` | History, connected keys, tools, stats. |
 | `my_tools` / `declare_my_tool` / `update_my_tool` / `remove_my_tool` | Tools you already have, when to use them, and how they did. |
 | `my_preferred_tools` / `prefer_tool` / `unprefer_tool` | Catalog tools you favour. |
-| `session_info` / `setup` | Connection, login and versions; set up, check, upgrade or remove. |
-| `use_token` / `login` | Log in. |
+| `session_info` | Connection, login and versions. |
+| `setup` | Set up, check, upgrade or remove (local only). |
+| `use_token` / `login` | Log in (local only). |
 
 A run reply looks like:
 
@@ -88,6 +104,14 @@ ruff check .
 
 The suite is offline: the router is faked.
 
+### Serving over HTTP
+
+`hyperroute-mcp serve [--host H] [--port P]` runs the server over Streamable HTTP at `/mcp`
+(default `127.0.0.1:8076`), for many accounts at once. Every request needs a bearer, resolved to an
+account through the router's `/auth/whoami` (cached a minute) and relayed on every call; none gets a
+401 pointing at `<HYPERROUTE_PUBLIC_URL>/.well-known/oauth-protected-resource/mcp`. Each account is
+rate-limited (429 with `Retry-After`). No token file, ledger, notices or caller profile.
+
 ### Environment variables
 
 None are needed against the hosted router. For development and self-hosting:
@@ -103,6 +127,9 @@ None are needed against the hosted router. For development and self-hosting:
 | `HYPERROUTE_NATIVE_TOOLS` | — | Exact coordinator tool ids. |
 | `HYPERROUTE_HELD` | — | Comma-separated plan groups you hold. |
 | `HYPERROUTE_GUARD` | block | `remind` makes the Claude Code guard remind instead of block. |
+| `HYPERROUTE_PUBLIC_URL` | `HYPERROUTE_BASE_URL` | `serve` only: the public origin the endpoint is reached at. |
+| `HYPERROUTE_MCP_RATE` / `HYPERROUTE_MCP_BURST` | `120` / `60` | `serve` only: calls per minute per account, and burst. |
+| `HYPERROUTE_LOG_LEVEL` | `info` | `serve` only: uvicorn log level. |
 
 ## License
 

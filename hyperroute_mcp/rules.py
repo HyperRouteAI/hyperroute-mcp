@@ -9,9 +9,7 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
 - Outside lookup = web search, page fetch, third-party API, remote MCP; by any route (tool, curl,
   script). Send each via `{p}run`: one item per lookup, that lookup alone in its query. Batch every
   lookup you already need into ONE call. Never two lookups in one item.
-- Or call your own tool directly: HyperRoute checks it first, allows it when yours is best, else
-  stops it. Stopped: send that lookup via `run`. Never route around a stop.
-- Not outside (no `run`): the user's files, git with their remotes, package installs, their storage,
+{guard}- Not outside (no `run`): the user's files, git with their remotes, package installs, their storage,
   your task list, local MCP servers, the user's connected accounts.
 - Per item: `ran` use the result. `do it yourself` use your own tools; its brief sets depth, not
   method: when an official API, registry or the page itself holds the answer, fetch it (search only
@@ -29,10 +27,16 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
 Why a pick, other candidates, evidence: `{p}ranking(run, n)`. Run another row: resend the item with `tool`."""
 
 
+# Only where the guard hook is installed: on a hosted client nothing checks the agent's own calls.
+_GUARD = """- Or call your own tool directly: HyperRoute checks it first, allows it when yours is best, else
+  stops it. Stopped: send that lookup via `run`. Never route around a stop.
+"""
+
+
 def text(server: str = "hyperroute") -> str:
-    return _RULES.format(p=f"mcp__{server}__")
+    return _RULES.format(p=f"mcp__{server}__", guard=_GUARD)
 
 
-def plain() -> str:
+def plain(guard: bool = True) -> str:
     """The same rules naming the tools without a client-specific prefix."""
-    return _RULES.format(p="")
+    return _RULES.format(p="", guard=_GUARD if guard else "")

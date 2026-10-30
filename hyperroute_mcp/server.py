@@ -5,25 +5,18 @@ import json
 import os
 import subprocess
 
+from mcp.server.mcpserver import Context
+from mcp.server.mcpserver import MCPServer as _Server
 from pydantic import BaseModel
-
-try:
-    from mcp.server.mcpserver import Context
-    from mcp.server.mcpserver import MCPServer as _Server
-except ImportError:
-    from mcp.server.fastmcp import Context
-    from mcp.server.fastmcp import FastMCP as _Server
 
 from . import agents, config, install, ledger, native, rules, tokenstore
 from .caller import Caller
 from .client import HyperRouteClient, Session
 
-_INSTRUCTIONS = rules.plain() + """
+_LOGIN = """Login: nothing routes until the user logs in; a call before that says how. The login persists;
+re-ask only on a 401."""
 
-Login: nothing routes until the user logs in; a call before that says how. The login persists;
-re-ask only on a 401.
-
-The user's own tools: "I have my own X, use it for Y" → `declare_my_tool` with their sentence
+_SHARED = """The user's own tools: "I have my own X, use it for Y" → `declare_my_tool` with their sentence
 verbatim as `triggers` (keep every condition; ask for it if they gave none). Never declare on your own.
 A `use_own` item: run their tool with the access you have, then report it.
 Put facts their rules turn on (file size, language, deadline, mood) into the item's query.
@@ -32,12 +25,28 @@ Preferred tools: "I like X, use it when acceptable" → `prefer_tool` (their wor
 gave a strength). Ambiguous name → ask the user. Never prefer on your own.
 
 Standing constraints (GDPR, budget, price stance) → `set_preferences` once; per-task ones go in the
-item's `facets`.
+item's `facets`."""
 
-`setup` sets up, checks, upgrades or removes HyperRoute: show its plan, apply on the user's yes.
+_SETUP = """`setup` sets up, checks, upgrades or removes HyperRoute: show its plan, apply on the user's yes.
 A `note:` line is for the user: pass it on in one line."""
 
-mcp = _Server("hyperroute", instructions=_INSTRUCTIONS)
+
+def instructions(hosted: bool = False) -> str:
+    """The server instructions. Hosted: no login, setup or guard (the client signs in, nothing is
+    installed on the user's machine)."""
+    if hosted:
+        return "\n\n".join((rules.plain(guard=False), _SHARED))
+    return "\n\n".join((rules.plain(), _LOGIN, _SHARED, _SETUP))
+
+
+_INSTRUCTIONS = instructions()
+
+mcp = _Server("hyperroute", instructions=_INSTRUCTIONS, version=install.version())
+
+# Set by `serve` (hosted.py): one process serves many accounts over HTTP, each request carrying its
+# own bearer. Nothing machine-bound runs then: no token file, notices, caller profile or ledger.
+_HOSTED = False
+_ledger = ledger
 
 _session = Session()
 
@@ -61,10 +70,13 @@ _caller = Caller()
 
 
 def _client() -> HyperRouteClient:
-    return HyperRouteClient(config.base_url(), _session, timeout=config.timeout(), caller=_caller)
+    return HyperRouteClient(config.base_url(), _session, timeout=config.timeout(),
+                            caller=None if _HOSTED else _caller)
 
 
 def _seen(ctx: Context | None) -> None:
+    if _HOSTED:
+        return
     try:
         meta = ctx.request_context.meta
         info = (getattr(meta, "model_extra", None) or {}).get("io.modelcontextprotocol/clientInfo")
@@ -83,6 +95,13 @@ def _seen(ctx: Context | None) -> None:
 
 
 def _client_name(ctx: Context | None) -> str | None:
+    try:
+        meta = ctx.request_context.meta
+        info = (getattr(meta, "model_extra", None) or {}).get("io.modelcontextprotocol/clientInfo")
+        if isinstance(info, dict) and info.get("name"):
+            return info["name"]
+    except Exception:
+        pass
     try:
         params = ctx.session.client_params
         info = getattr(params, "client_info", None) or getattr(params, "clientInfo", None)
@@ -121,6 +140,9 @@ async def _authed(coro):
     out = await coro
     if isinstance(out, dict) and out.get("_http_status") == 401:
         _forget_session()
+        if _HOSTED:
+            return {"_error": True, "_http_status": 401,
+                    "message": "this HyperRoute sign-in is no longer valid: reconnect the app"}
         return {"_error": True, "_http_status": 401, "message":
                 "your saved HyperRoute login is no longer valid (token revoked or expired) — "
                 "re-authenticate: ask for a new login line from hyperroute.io (Connect, step 2) and call "
@@ -160,7 +182,7 @@ async def session_info(ctx: Context | None = None) -> dict:
     out = {"router": "unreachable" if isinstance(health, dict) and health.get("_error") else "ok",
            "base_url": config.base_url(), "logged_in": _session.logged_in,
            "user_id": _session.user_id, "email": _session.email, "api_key": masked,
-           "token_source": "env" if _session.env_managed else "cache",
+           "token_source": "connector" if _HOSTED else "env" if _session.env_managed else "cache",
            "mcp_client": _client_name(ctx),
            "native_tools": declared.get("native_tools", []),
            "held_plans": (declared.get("entitlements") or {}).get("held", []),
@@ -220,6 +242,8 @@ def _describe_plan(plan: dict) -> list[str]:
 
 
 async def _notices(ctx: Context | None) -> list[str]:
+    if _HOSTED:
+        return []
     out = []
     try:
         st = await asyncio.to_thread(install.status)
@@ -395,7 +419,8 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
               ctx: Context | None = None) -> str:
     """Every outside lookup (search, page, third-party API) goes here; never do one yourself first.
     Each item is ranked on its own; the best tool runs and its result returns, or the item says do
-    it yourself / connect a key. One item per lookup; batch all known lookups in one call.
+    it yourself / connect a key: do what it says (needs a key = stop and ask the user, never do it
+    another way). One item per lookup; batch all known lookups in one call.
 
     items: strings, or {query, facets?, tool?}. query is literal and self-contained (the tool cannot
       see this chat). tool: run that row of the item's ranking instead.
@@ -406,24 +431,24 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
         return "STOP: " + err["message"] + " Do not do this task another way meanwhile."
     reps = [_report(r) for r in reports or []]
     sent = {r.get("item") for r in reps}
-    owed = [r for r in ledger.pending() if r.get("high") and r.get("item") not in sent]
+    owed = [r for r in _ledger.pending() if r.get("high") and r.get("item") not in sent]
     if owed:
-        return ("REPORT FIRST: " + ledger.describe(owed) + " are high-stakes and unreported. Send "
+        return ("REPORT FIRST: " + _ledger.describe(owed) + " are high-stakes and unreported. Send "
                 "their scores in `reports` (silently), then run again.")
     payload = {"items": [_item(x) for x in items or []], "reports": reps, "mode": mode,
                "context": await _native_context(ctx, None)}
     try:
         out = await _authed(_client().run(payload))
     except Exception:
-        ledger.note_outage()
+        _ledger.note_outage()
         raise
     if not isinstance(out, dict) or out.get("_error"):
         return _as_text(out)
     text = _absorb(out, reps)
     rid = out.get("run")
-    still = [r for r in ledger.pending() if r.get("item") and not r["item"].startswith(f"{rid}/")]
+    still = [r for r in _ledger.pending() if r.get("item") and not r["item"].startswith(f"{rid}/")]
     if still:
-        text += "\nstill owed: " + ledger.describe(still)
+        text += "\nstill owed: " + _ledger.describe(still)
     return await _noted(text, ctx)
 
 
@@ -434,13 +459,13 @@ def _absorb(out: dict, reps: list[dict]) -> str:
     failed = set((out.get("reports") or {}).get("failed") or [])
     for r in reps:
         if r.get("item") and r["item"] not in failed:
-            ledger.clear_item(r["item"])
+            _ledger.clear_item(r["item"])
     rid = out.get("run")
     for n, it in enumerate(out.get("items") or [], 1):
         if it.get("report") == "always":
-            ledger.add_run(it.get("tool") or "", f"{rid}/{n}", high=it.get("stakes") == "high")
+            _ledger.add_run(it.get("tool") or "", f"{rid}/{n}", high=it.get("stakes") == "high")
         if it.get("action") == "do_yourself":
-            ledger.grant_pass(it.get("query") or "")
+            _ledger.grant_pass(it.get("query") or "")
     return out.get("text") or ""
 
 
