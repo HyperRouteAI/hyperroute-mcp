@@ -159,9 +159,11 @@ def _route(query: str) -> str | None:
     key = config.preset_api_key() or (tokenstore.load(base) or {}).get("api_key")
     try:
         ctx = {"native_tools": _native_ids(base)}
+        body = {"query": query, "detail": "min", "format": "text", "context": ctx}
+        if (ref := ledger.caller()):
+            body["caller"] = {"ref": ref}             # the profile the MCP already sent, by reference
         r = httpx.post(f"{base}/recommend", timeout=ROUTE_TIMEOUT,
-                       headers={"authorization": f"Bearer {key}"} if key else {},
-                       json={"query": query, "detail": "min", "format": "text", "context": ctx})
+                       headers={"authorization": f"Bearer {key}"} if key else {}, json=body)
     except Exception:
         ledger.note_outage()
         return None

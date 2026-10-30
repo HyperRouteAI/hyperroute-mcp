@@ -265,3 +265,15 @@ def test_the_pass_most_about_the_call_is_spent():
     assert ledger.take_pass("https://www.python-httpx.org/async/ http2 support")
     left = ledger.load()["passes"]
     assert len(left) == 1 and "advisories" in left[0]["words"]
+
+
+def test_guard_route_carries_the_mcps_caller_ref(monkeypatch):
+    import httpx
+    sent = {}
+
+    class R:
+        is_success, text = True, "session: s\nverdict: use_native\nact: x"
+    monkeypatch.setattr(hooks, "_native_ids", lambda base: [])
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: sent.update(kw["json"]) or R())
+    ledger.set_caller("cp-123")
+    assert hooks._route("q") == R.text and sent["caller"] == {"ref": "cp-123"}

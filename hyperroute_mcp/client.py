@@ -82,6 +82,12 @@ class HyperRouteClient:
         install.note_router(r.headers.get(install.RESPONSE_HEADER))
         if sent is not None:
             self.caller.ack(r.headers.get(HEADER), sent, r.is_success)
+            if self.caller.ref:
+                try:
+                    from . import ledger
+                    ledger.set_caller(self.caller.ref)
+                except Exception:
+                    pass
         if as_text and r.is_success:
             return r.text
         return _unwrap(r)

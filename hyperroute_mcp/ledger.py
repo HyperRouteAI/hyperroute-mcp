@@ -171,3 +171,16 @@ def pending(key: str | None = None) -> list[dict]:
 def describe(runs: list[dict]) -> str:
     return ", ".join(f"{r['item']} ({r['tool_id']})" if r.get("item") else
                      f"{r['tool_id']} (session {r.get('session_id') or '?'})" for r in runs)
+
+
+# ---- the caller profile reference the MCP last had acknowledged, so the guard's own routes carry it
+
+def set_caller(ref: str) -> None:
+    s = load()
+    if s.get("caller") != ref:
+        s["caller"] = ref
+        save(s)
+
+
+def caller() -> str | None:
+    return load().get("caller")
