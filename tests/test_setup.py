@@ -174,6 +174,8 @@ def test_guard_lets_the_agents_own_tool_through_when_it_is_best(logged, monkeypa
     search = {"tool_name": "WebSearch", "tool_input": {"query": "react 19 release notes"}}
     assert hooks.output("web-guard", ["--block"], search) is None
     assert seen == ["react 19 release notes"]                  # the call itself was ranked
+    log = (install.home() / "state" / "guard.jsonl").read_text().splitlines()
+    assert json.loads(log[-1])["decision"] == "allow"
 
 
 def test_guard_names_the_better_tool(logged):

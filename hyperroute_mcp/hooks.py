@@ -178,6 +178,19 @@ def _best(text: str) -> tuple[str, str]:
     return "", ""
 
 
+def _log(tool: str, lookup: str, decision: str, best: str = "") -> None:
+    """One line per guard decision, for whoever audits a session: the agent never sees it."""
+    import time
+    try:
+        path = install.home() / "state" / "guard.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as f:
+            f.write(json.dumps({"at": time.time(), "tool": tool, "lookup": lookup[:400],
+                                "decision": decision, "best": best}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
     if not outside(payload, server):
         return None
@@ -191,15 +204,20 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
         return None
     # A "do it yourself" answer for THIS lookup lets exactly one call through.
     if ledger.take_pass(json.dumps(payload.get("tool_input") or {}, ensure_ascii=False)):
+        _log(tool, _lookup(payload), "pass")
         return None
     if block and not config.classic_verbs():
         # One-call mode: rank this very call. The agent's own tool best → it goes through, silently.
-        text = _route(_lookup(payload))
+        lookup = _lookup(payload)
+        text = _route(lookup)
         if text is None and ledger.in_outage():
+            _log(tool, lookup, "outage")
             return None
         if text is not None and ledger.handed_back(text):
+            _log(tool, lookup, "allow")
             return None
         best, why = _best(text or "")
+        _log(tool, lookup, "deny", best)
         better = f"{best} is better for this" + (f" ({why.rstrip('.')})" if why else "") if best else \
             "this lookup needs a HyperRoute ranking"
         return {"hookSpecificOutput": {
