@@ -29,11 +29,15 @@ def test_router_header_wins_for_latest():
     assert install.router_versions()["min"] == "0.1.0"
 
 
+_EXA = "session: s\nverdict: interpose\n\n→ exa  Exa  free  ready  best for this."
+
+
 def test_hook_outputs(monkeypatch):
     monkeypatch.setattr(hooks, "logged_in", lambda: True)
+    monkeypatch.setattr(hooks, "_route", lambda q: _EXA)
     s = hooks.output("session-start", ["--server", "hr"])
     assert s["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "mcp__hr__recommend" in s["hookSpecificOutput"]["additionalContext"]
+    assert "mcp__hr__run" in s["hookSpecificOutput"]["additionalContext"]
     sub = hooks.output("subagent-start", [])
     assert sub["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
     remind = hooks.output("web-guard", [], {"tool_name": "WebSearch"})
@@ -150,6 +154,7 @@ def test_only_remote_mcp_servers_are_outside(sandbox):
 @pytest.fixture
 def logged(monkeypatch):
     monkeypatch.setattr(hooks, "logged_in", lambda: True)
+    monkeypatch.setattr(hooks, "_route", lambda q: _EXA)
 
 
 def _deny(out):
@@ -158,8 +163,33 @@ def _deny(out):
 
 def test_hook_rules_are_the_tested_wording():
     text = hooks.output("session-start", ["--server", "hr"])["hookSpecificOutput"]["additionalContext"]
-    assert "CRITICAL FAILURE" in text and "mcp__hr__recommend" in text
-    assert "one `recommend` covering two items of a list" in text
+    assert "CRITICAL FAILURE" in text and "mcp__hr__run" in text
+    assert "Never two lookups in one item" in text and "recommend" not in text
+
+
+def test_guard_lets_the_agents_own_tool_through_when_it_is_best(logged, monkeypatch):
+    seen = []
+    monkeypatch.setattr(hooks, "_route", lambda q: seen.append(q) or
+                        "session: s\nverdict: use_native  (use your own tools)\nact: x")
+    search = {"tool_name": "WebSearch", "tool_input": {"query": "react 19 release notes"}}
+    assert hooks.output("web-guard", ["--block"], search) is None
+    assert seen == ["react 19 release notes"]                  # the call itself was ranked
+    log = (install.home() / "state" / "guard.jsonl").read_text().splitlines()
+    assert json.loads(log[-1])["decision"] == "allow"
+
+
+def test_guard_names_the_better_tool(logged):
+    out = hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch", "tool_input": {"query": "x"}})
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason == "WebSearch stopped: exa is better for this (best for this). Send it via mcp__hyperroute__run."
+
+
+def test_guard_allows_when_the_router_is_down(logged, monkeypatch):
+    def down(q):
+        ledger.note_outage()
+        return None
+    monkeypatch.setattr(hooks, "_route", down)
+    assert hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch", "tool_input": {"query": "x"}}) is None
 
 
 def test_a_handed_back_lookup_lets_one_call_for_that_lookup_through(logged):
@@ -237,3 +267,22 @@ def test_the_pass_most_about_the_call_is_spent():
     assert ledger.take_pass("https://www.python-httpx.org/async/ http2 support")
     left = ledger.load()["passes"]
     assert len(left) == 1 and "advisories" in left[0]["words"]
+
+
+def test_guard_route_carries_the_mcps_caller_ref(monkeypatch):
+    import httpx
+    sent = {}
+
+    class R:
+        is_success, text = True, "session: s\nverdict: use_native\nact: x"
+    monkeypatch.setattr(hooks, "_native_ids", lambda base: [])
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: sent.update(kw["json"]) or R())
+    ledger.set_caller("cp-123")
+    assert hooks._route("q") == R.text and sent["caller"] == {"ref": "cp-123"}
+
+
+def test_writing_a_url_into_a_file_is_not_an_outside_lookup():
+    note = "printf '- httpx 0.28.1 (https://pypi.org/project/httpx/)' >> NOTES.md && git commit -am x"
+    assert not hooks.outside({"tool_name": "Bash", "tool_input": {"command": note}}, "hyperroute")
+    fetch = "echo hi && curl https://x.test"
+    assert hooks.outside({"tool_name": "Bash", "tool_input": {"command": fetch}}, "hyperroute")

@@ -82,6 +82,12 @@ class HyperRouteClient:
         install.note_router(r.headers.get(install.RESPONSE_HEADER))
         if sent is not None:
             self.caller.ack(r.headers.get(HEADER), sent, r.is_success)
+            if self.caller.ref:
+                try:
+                    from . import ledger
+                    ledger.set_caller(self.caller.ref)
+                except Exception:
+                    pass
         if as_text and r.is_success:
             return r.text
         return _unwrap(r)
@@ -99,6 +105,12 @@ class HyperRouteClient:
         return await self._request("POST", "/recommend", auth=True,
                                    json={**payload, "detail": "min", "format": "text"},
                                    as_text=True, tag=True)
+    async def run(self, payload: dict) -> Any:
+        return await self._request("POST", "/run", auth=True, json=payload, tag=True,
+                                   timeout=config.execute_timeout())
+    async def ranking(self, run: str, item: int, evidence: bool = False) -> Any:
+        return await self._request("POST", "/ranking", auth=True, as_text=not evidence,
+                                   json={"run": run, "item": item, "evidence": evidence})
     async def describe(self, payload: dict) -> Any:
         return await self._request("POST", "/describe", auth=True, json=payload)
     async def catalog(self) -> Any:

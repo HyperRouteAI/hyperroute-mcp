@@ -72,6 +72,14 @@ class FakeClient:
         self._record("recommend_text", payload)
         return self.answers.get("recommend_text", "session: s-1\nact: execute('brave_search', <query>)")
 
+    async def run(self, payload):
+        self._record("run", payload)
+        return self.answers.get("run", {"run": "r_1", "items": [], "text": "run r_1"})
+
+    async def ranking(self, run, item, evidence=False):
+        self._record("ranking", {"run": run, "item": item, "evidence": evidence})
+        return self.answers.get("ranking", "session: s-1")
+
     async def describe(self, payload):
         self._record("describe", payload)
         return self.answers.get("describe", {"tool_id": payload["tool_id"]})
