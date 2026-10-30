@@ -24,7 +24,8 @@ _LOCAL = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"}
 # Work on the user's own things: their repos, their packages, their storage, their containers.
 _OWN_WORK = {"git", "gh", "npm", "npx", "pnpm", "yarn", "bun", "pip", "pip3", "uv", "uvx", "poetry",
              "pipx", "conda", "cargo", "go", "brew", "apt", "apt-get", "dnf", "docker", "podman",
-             "kubectl", "helm", "ssh", "scp", "rsync", "aws", "gcloud", "gsutil", "az", "make"}
+             "kubectl", "helm", "ssh", "scp", "rsync", "aws", "gcloud", "gsutil", "az", "make",
+             "echo", "printf", "cat", "tee", "sed", "grep"}   # text that names a URL is not a fetch
 _SEGMENT = re.compile(r"&&|\|\||[;|\n]")
 _ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # Connectors to the user's own accounts (drive, docs, mail, chat) that the agent app provides.

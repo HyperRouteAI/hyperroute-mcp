@@ -279,3 +279,10 @@ def test_guard_route_carries_the_mcps_caller_ref(monkeypatch):
     monkeypatch.setattr(httpx, "post", lambda url, **kw: sent.update(kw["json"]) or R())
     ledger.set_caller("cp-123")
     assert hooks._route("q") == R.text and sent["caller"] == {"ref": "cp-123"}
+
+
+def test_writing_a_url_into_a_file_is_not_an_outside_lookup():
+    note = "printf '- httpx 0.28.1 (https://pypi.org/project/httpx/)' >> NOTES.md && git commit -am x"
+    assert not hooks.outside({"tool_name": "Bash", "tool_input": {"command": note}}, "hyperroute")
+    fetch = "echo hi && curl https://x.test"
+    assert hooks.outside({"tool_name": "Bash", "tool_input": {"command": fetch}}, "hyperroute")
