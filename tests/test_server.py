@@ -440,3 +440,17 @@ async def test_a_do_yourself_item_grants_a_pass(monkeypatch, logged_in):
     monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
     await server.run(["latest react version"])
     assert ledger.take_pass('{"query": "react latest version"}')
+
+
+async def test_a_useless_report_reopens_the_item_and_grants_its_pass(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    ledger.add_run("nominatim", "s1", item="r_1/7")
+    reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/7 (nominatim useless)",
+                "items": [{"action": "do_yourself", "query": "geocode 350 Fifth Avenue New York",
+                           "reopens": "r_1/7"}],
+                "reports": {"accepted": 1, "failed": []}}
+    monkeypatch.setattr(server, "_client", lambda: FakeClient(run=reopened))
+    out = await server.report_outcome("useless", item="r_1/7", reason="wrong_output")
+    assert out == {"ok": True, "reopened": reopened["text"]}
+    assert ledger.pending() == []
+    assert ledger.take_pass('{"query": "350 Fifth Avenue New York latitude"}')

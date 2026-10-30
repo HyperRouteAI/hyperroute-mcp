@@ -22,7 +22,9 @@ _RUN_RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
   it another way. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
   one line.
 - "report this one": send a score in `reports` on your next `run`, or `{p}report_outcome(item=…)`
-  before finishing. "report only if wrong": report only then. Reports are silent.
+  before finishing. "report only if wrong": report only then. Reports are silent. A wrong or empty
+  result: report it `useless` (`blocked` if it errored); the reply brings the next tool's result or
+  hands the item to you ("for r_x/n"). Never resend a lookup a tool just got wrong.
 - Never put the user's email, name, account or token in an outside request.
 - State only what a tool result showed; mark the rest "not verified".
 

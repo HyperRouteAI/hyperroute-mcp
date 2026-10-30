@@ -634,6 +634,18 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
         raise
     if not isinstance(out, dict) or out.get("_error"):
         return _as_text(out)
+    text = _absorb(out, reps)
+    rid = out.get("run")
+    still = [r for r in ledger.pending() if r.get("item") and not r["item"].startswith(f"{rid}/")]
+    if still:
+        text += "\nstill owed: " + ledger.describe(still)
+    return await _noted(text, ctx)
+
+
+def _absorb(out: dict, reps: list[dict]) -> str:
+    """Book a run reply into the ledger: clear the reports it accepted, owe the reports its items
+    ask for, and let one own call through for each item handed back (including one a negative
+    report reopened). Returns the reply text."""
     failed = set((out.get("reports") or {}).get("failed") or [])
     for r in reps:
         if r.get("item") and r["item"] not in failed:
@@ -645,11 +657,7 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
                            high=it.get("stakes") == "high")
         if it.get("action") == "do_yourself":
             ledger.grant_pass(it.get("query") or "")
-    text = out.get("text") or ""
-    still = [r for r in ledger.pending() if r.get("item") and not r["item"].startswith(f"{rid}/")]
-    if still:
-        text += "\nstill owed: " + ledger.describe(still)
-    return await _noted(text, ctx)
+    return out.get("text") or ""
 
 
 @_run_tool
@@ -782,7 +790,8 @@ async def report_outcome(score: str, item: str | None = None, session_id: str | 
     score: full | partial | useless (wrong or empty) | not_used | blocked (error, auth, safety).
     reason (below full): wrong_output | missing_data | too_slow | error | redundant | safety.
     comment: what was wrong or missing. satisfied: the user's thumbs up/down, if they gave one.
-    Never report a tool skipped for a missing key."""
+    Never report a tool skipped for a missing key. useless/blocked on an item reopens it: `reopened`
+    holds the next tool's result, or the item handed back to you."""
     if (err := _require_login()):
         return err
     _seen(ctx)
@@ -793,8 +802,9 @@ async def report_outcome(score: str, item: str | None = None, session_id: str | 
             return out
         if item in ((out.get("reports") or {}).get("failed") or []):
             return {"ok": False, "error": "unknown item", "item": item}
-        ledger.clear_item(item)
-        return {"ok": True}
+        text = _absorb(out, [rep])
+        # A useless/blocked score reopens the item: what runs next, or the item handed back.
+        return {"ok": True, "reopened": text} if out.get("items") else {"ok": True}
     if not (session_id and tool_id):
         return {"ok": False, "error": "pass item, or session_id and tool_id"}
     payload: dict = {"session_id": session_id, "tool_id": tool_id, "score": score,
