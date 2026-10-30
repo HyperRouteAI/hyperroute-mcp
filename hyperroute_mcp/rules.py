@@ -17,7 +17,9 @@ _RUN_RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
   stops it. Stopped: send that lookup via `run`. Never route around a stop.
 - Not outside (no `run`): the user's files, git with their remotes, package installs, their storage,
   your task list, local MCP servers, the user's connected accounts.
-- Per item: `ran` use the result. `do it yourself` use your own tools. `needs a key` STOP that item:
+- Per item: `ran` use the result. `do it yourself` use your own tools; its brief sets depth, not
+  method: when an official API, registry or the page itself holds the answer, fetch it (search only
+  to find it), never settle for a snippet. `needs a key` STOP that item:
   tell the user "<tool> is best for this and needs a key", show the steps, ask for the key; do not do
   it another way. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
   one line.
