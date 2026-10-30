@@ -68,10 +68,6 @@ class FakeClient:
         self._record("catalog", {})
         return self.answers.get("catalog", self.CATALOG)
 
-    async def recommend_text(self, payload):
-        self._record("recommend_text", payload)
-        return self.answers.get("recommend_text", "session: s-1\nact: execute('brave_search', <query>)")
-
     async def run(self, payload):
         self._record("run", payload)
         return self.answers.get("run", {"run": "r_1", "items": [], "text": "run r_1"})
@@ -83,14 +79,6 @@ class FakeClient:
     async def describe(self, payload):
         self._record("describe", payload)
         return self.answers.get("describe", {"tool_id": payload["tool_id"]})
-
-    async def execute(self, tool_id, query, session_id=None):
-        self._record("execute", {"tool_id": tool_id, "query": query, "session_id": session_id})
-        return self.answers.get("execute", {"result": "ok"})
-
-    async def report_outcome(self, payload):
-        self._record("report_outcome", payload)
-        return self.answers.get("report_outcome", {"ok": True})
 
     async def console(self, view, user_id):
         self._record("console", {"view": view, "user_id": user_id})

@@ -55,23 +55,20 @@ def patched(monkeypatch):
     return _install
 
 
-async def test_recommend_text_requests_the_min_text_wire(patched):
+async def test_ranking_returns_text_and_is_authenticated(patched):
     import json
 
-    t = patched(httpx.Response(200, text="session: s-1\nact: execute('x', <query>)"))
-    session = Session("hyr_abc")
-    out = await HyperRouteClient("http://router.test", session).recommend_text({"query": "q"})
-
-    body = json.loads(t.request.content)
-    assert body["detail"] == "min" and body["format"] == "text"
+    t = patched(httpx.Response(200, text="run r_1 item 1\n→ exa"))
+    out = await HyperRouteClient("http://router.test", Session("hyr_abc")).ranking("r_1", 1)
+    assert json.loads(t.request.content) == {"run": "r_1", "item": 1, "evidence": False}
     assert t.request.headers["authorization"] == "Bearer hyr_abc"
-    assert isinstance(out, str) and out.startswith("session: s-1")
+    assert out == "run r_1 item 1\n→ exa"
 
 
-async def test_recommend_text_still_returns_a_dict_on_an_error(patched):
-    patched(httpx.Response(503, json={"detail": {"error": "no_bundle"}}))
-    out = await HyperRouteClient("http://router.test", Session()).recommend_text({"query": "q"})
-    assert out["_error"] and out["error"] == "no_bundle"
+async def test_ranking_still_returns_a_dict_on_an_error(patched):
+    patched(httpx.Response(404, json={"detail": {"error": "unknown_run"}}))
+    out = await HyperRouteClient("http://router.test", Session("hyr_abc")).ranking("r_x", 1)
+    assert out["_error"] and out["error"] == "unknown_run"
 
 
 async def test_unreachable_router_is_reported_not_raised(monkeypatch):
@@ -116,11 +113,6 @@ async def _capture(method, *args, **kwargs):
     return t.request
 
 
-async def test_report_outcome_is_authenticated():
-    req = await _capture("report_outcome", {"session_id": "s-1", "tool_id": "t", "score": "full"})
-    assert req.headers.get("authorization") == "Bearer hyr_k"
-
-
 async def test_report_narrative_is_authenticated():
     req = await _capture("report_narrative", {"text": "x"})
     assert req.headers.get("authorization") == "Bearer hyr_k"
@@ -138,7 +130,7 @@ async def test_private_tool_calls_are_authenticated_and_well_addressed():
     assert req.method == "DELETE" and req.url.path == "/private-tools/__own__:my_search"
 
 
-async def test_execute_waits_longer_than_other_calls(monkeypatch):
+async def test_run_waits_longer_than_other_calls(monkeypatch):
     seen = []
     real = httpx.AsyncClient
 
@@ -149,7 +141,7 @@ async def test_execute_waits_longer_than_other_calls(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", spy)
     c = HyperRouteClient("http://t", Session("k"), timeout=30)
-    await c.execute("brave_search", "q")
+    await c.run({"items": [{"query": "q"}]})
     await c.health()
     assert seen[-2] >= 900 and seen[-1] == 30
 

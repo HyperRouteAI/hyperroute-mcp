@@ -101,10 +101,6 @@ class HyperRouteClient:
         return await self._request("POST", "/auth/login", json={"email": email, "password": password})
     async def whoami(self) -> Any:
         return await self._request("POST", "/auth/whoami", auth=True)
-    async def recommend_text(self, payload: dict) -> Any:
-        return await self._request("POST", "/recommend", auth=True,
-                                   json={**payload, "detail": "min", "format": "text"},
-                                   as_text=True, tag=True)
     async def run(self, payload: dict) -> Any:
         return await self._request("POST", "/run", auth=True, json=payload, tag=True,
                                    timeout=config.execute_timeout())
@@ -120,17 +116,11 @@ class HyperRouteClient:
     async def onboard(self, tool_id: str, api_key: str, label: str | None) -> Any:
         return await self._request("POST", "/onboard", auth=True,
                                    json={"tool_id": tool_id, "api_key": api_key, "label": label})
-    async def execute(self, tool_id: str, query: str, session_id: str | None = None) -> Any:
-        return await self._request("POST", "/execute", auth=True,
-                                   json={"tool_id": tool_id, "query": query, "session_id": session_id}, tag=True,
-                                   timeout=config.execute_timeout())
     async def read_result(self, ref: str, op: str, offset: int, limit: int,
                           path: list | None, query: str | None) -> Any:
         return await self._request("POST", f"/result/{_seg(ref)}/read", auth=True,
                                    json={"op": op, "offset": offset, "limit": limit,
                                          "path": path, "query": query})
-    async def report_outcome(self, payload: dict) -> Any:
-        return await self._request("POST", "/report_outcome", auth=True, json=payload, tag=True)
     async def report_narrative(self, payload: dict) -> Any:
         return await self._request("POST", "/report_narrative", auth=True, json=payload)
     async def console(self, view: str, user_id: str) -> Any:

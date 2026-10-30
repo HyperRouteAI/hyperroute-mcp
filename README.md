@@ -55,7 +55,7 @@ which coordinator launched it and declares it; `session_info` shows what it reso
 | `run` | Lookups → each ranked on its own; clear picks run, results back; owed reports ride along. |
 | `ranking` | The full ranking behind one run item (and the evidence, on request). |
 | `connect_info` / `onboard` | A tool's signup steps; save and test its API key. |
-| `report_outcome` / `report_narrative` | Feedback on a call, or on a whole run. |
+| `report_outcome` / `report_narrative` | Score one run item, or feedback on a whole task. |
 | `describe` | One tool's details: `about` · `price` · `facets` · `evidence`. |
 | `fetch_result` | Page through a large result. |
 | `get_preferences` / `set_preferences` | Preferences applied to every route, and every facet you can set. |
@@ -77,8 +77,6 @@ run r_7f3a
   then onboard('sonar_deep_research', <key>) and resend this item
 owed: r_7f3a/4 → reports=[{item, score}] on next run
 ```
-
-`HYPERROUTE_MCP_VERBS=classic` exposes `recommend` + `execute` instead (the web demo's agent uses it).
 
 ## Development
 
@@ -105,7 +103,6 @@ None are needed against the hosted router. For development and self-hosting:
 | `HYPERROUTE_NATIVE_TOOLS` | — | Exact coordinator tool ids. |
 | `HYPERROUTE_HELD` | — | Comma-separated plan groups you hold. |
 | `HYPERROUTE_GUARD` | block | `remind` makes the Claude Code guard remind instead of block. |
-| `HYPERROUTE_MCP_VERBS` | `run` | `classic`: `recommend` + `execute` instead of `run` + `ranking`. |
 
 ## License
 

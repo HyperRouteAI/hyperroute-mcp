@@ -35,8 +35,8 @@ def _quiet_notices():
 async def test_notice_rides_the_first_result_once(fake, monkeypatch):
     server._told.clear()
     monkeypatch.setattr(server, "_product", lambda ctx: "claude_code")
-    first = await server.recommend("q")
-    second = await server.recommend("q")
+    first = await server.run(["q"])
+    second = await server.run(["q"])
     assert "note: HyperRoute setup is not finished" in first
     assert "note:" not in second
 
@@ -44,21 +44,6 @@ async def test_notice_rides_the_first_result_once(fake, monkeypatch):
 async def test_every_tool_is_registered():
     assert {t.name for t in await server.mcp.list_tools()} == TOOLS
 
-
-async def test_instructions_carry_the_hard_rule_and_the_native_exception():
-    text = server._INSTRUCTIONS                                   # the demo's classic wording
-    assert "NEVER permitted to perform an external task on your own" in text
-    assert "use_native" in text
-    assert "use_own" in text
-    for word in ("ready", "needs_key", "native", "own", "soon"):
-        assert word in text
-
-
-
-async def test_native_verdict_follows_the_measured_instruction():
-    text = server._INSTRUCTIONS
-    assert "`instruction:`" in text and "`prompt:`" in text and "`alternative:`" in text
-    assert "`instruction:`" in (server.recommend.__doc__ or "")
 
 class _Info:
     def __init__(self, name):
@@ -84,41 +69,6 @@ def test_client_name_is_none_when_unavailable(ctx):
     assert server._client_name(ctx) is None
 
 
-async def test_recommend_returns_the_routers_text_verbatim(fake):
-    out = await server.recommend("find recent RCTs on statins")
-    assert isinstance(out, str)
-    assert out == "session: s-1\nact: execute('brave_search', <query>)"
-
-
-async def test_recommend_declares_the_native_baseline(fake):
-    await server.recommend("q")
-    ctx = fake.last("recommend_text")["context"]
-    assert ctx["native_tools"] == ["claude_code_opus_deep", "claude_code_sonnet_quick"]
-
-
-async def test_recommend_keeps_the_declaration_under_a_caller_context(fake):
-    await server.recommend("q", context={"native_tools": [], "usage": {"monthly_queries": 5}})
-    ctx = fake.last("recommend_text")["context"]
-    assert ctx["native_tools"] == ["claude_code_opus_deep", "claude_code_sonnet_quick"]
-    assert ctx["usage"] == {"monthly_queries": 5}
-
-
-async def test_recommend_passes_facets_through_and_omits_unset_knobs(fake):
-    await server.recommend("q", facets={"price": {"weight": 2}})
-    payload = fake.last("recommend_text")
-    assert payload["facets"] == {"price": {"weight": 2}}
-    assert "n_runner_ups" not in payload
-
-
-async def test_recommend_renders_an_error_as_text(monkeypatch, logged_in):
-    c = FakeClient(recommend_text={"_error": True, "_http_status": 503,
-                                   "message": "no model bundle loaded"})
-    monkeypatch.setattr(server, "_client", lambda: c)
-    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
-    out = await server.recommend("q")
-    assert out == "error: no model bundle loaded  (HTTP 503)"
-
-
 async def test_describe_defaults_to_about(fake):
     await server.describe("brave_search")
     assert fake.last("describe")["sections"] == ["about"]
@@ -132,14 +82,14 @@ async def test_describe_forwards_the_route_relative_query(fake):
 
 
 @pytest.mark.parametrize("call", [
-    lambda: server.execute("brave_search", "q"),
+    lambda: server.ranking("r_1", 1),
     lambda: server.onboard("brave_search", "k"),
     lambda: server.connect_info("brave_search"),
     lambda: server.get_preferences(),
     lambda: server.set_preferences({}),
     lambda: server.fetch_result("ref"),
     lambda: server.my_tools(),
-    lambda: server.report_outcome("s-1", "brave_search", "full"),
+    lambda: server.report_outcome("r_1/1", "full"),
 ])
 async def test_gated_tools_refuse_when_logged_out(monkeypatch, call):
     monkeypatch.setattr(server, "_session", Session())
@@ -147,15 +97,10 @@ async def test_gated_tools_refuse_when_logged_out(monkeypatch, call):
     assert out["_error"] and "not logged in" in out["message"].lower()
 
 
-async def test_recommend_refuses_when_logged_out(fake, monkeypatch):
+async def test_run_refuses_when_logged_out(fake, monkeypatch):
     monkeypatch.setattr(server, "_session", Session())
-    out = await server.recommend("q")
+    out = await server.run(["q"])
     assert out.startswith("STOP") and "use_token" in out and "`login`" in out and "login_link" not in out
-
-
-async def test_execute_runs_once_logged_in(fake, logged_in):
-    assert await server.execute("brave_search", "q", session_id="s-1") == {"result": "ok"}
-    assert fake.last("execute") == {"tool_id": "brave_search", "query": "q", "session_id": "s-1"}
 
 
 async def _answer(value):
@@ -291,12 +236,9 @@ async def test_my_tools_carries_the_own_report(fake, logged_in):
 
 async def test_instructions_teach_declaring_and_the_own_verdict():
     text = server._INSTRUCTIONS
-    assert "declare_my_tool" in text
-    assert "never declare one on your own initiative" in text
-    assert "CONDITIONAL" in text and "UNSCORED" in text
-    assert "VERBATIM" in text and "context.situation" not in text
-    assert "consider" in text
-    assert "report_outcome` against the `__own__:" in text
+    assert "declare_my_tool" in text and "verbatim" in text
+    assert "Never declare on your own" in text
+    assert "use_own" in text
 
 
 async def test_preferred_tool_verbs_require_login(fake, monkeypatch):
@@ -333,9 +275,7 @@ async def test_unprefer_and_list(fake, logged_in):
 
 async def test_instructions_teach_preferring_and_the_passed_over_line():
     text = server._INSTRUCTIONS
-    assert "prefer_tool" in text and "Never prefer a tool on your own initiative" in text
-    assert "passed over" in text and "MARGIN" in text
-
+    assert "prefer_tool" in text and "Never prefer on your own" in text and "margin" in text
 
 
 async def test_setup_plans_then_removes(fake, logged_in, monkeypatch, tmp_path):
@@ -351,42 +291,16 @@ async def test_setup_plans_then_removes(fake, logged_in, monkeypatch, tmp_path):
         "report-check", "session-start", "subagent-start", "web-guard"]
 
 
-async def test_an_unreported_run_holds_the_next_route_and_run(fake, logged_in):
-    assert await server.execute("brave_search", "q", session_id="s-1") == {"result": "ok"}
-    held = await server.recommend("next lookup")
-    assert held.startswith("REPORT FIRST") and "brave_search" in held
-    assert (await server.execute("brave_search", "q2"))["error"] == "report_first"
-    await server.report_outcome("full", session_id="s-1", tool_id="brave_search")
-    assert not (await server.recommend("next lookup")).startswith("REPORT FIRST")
-
-
-async def test_a_refused_execute_owes_no_report(monkeypatch, logged_in):
-    c = FakeClient(execute={"error": "needs_onboard", "message": "connect a key"})
-    monkeypatch.setattr(server, "_client", lambda: c)
-    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
-    await server.execute("omdb", "Inception")
-    assert not (await server.recommend("next")).startswith("REPORT FIRST")
-
-
-async def test_a_handed_back_recommend_grants_a_pass(monkeypatch, logged_in):
-    from hyperroute_mcp import ledger
-    c = FakeClient(recommend_text="session: s-9\nverdict: use_native  (use your own tools)\nact: x")
-    monkeypatch.setattr(server, "_client", lambda: c)
-    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
-    await server.recommend("latest version of the npm package react")
-    assert ledger.take_pass("https://registry.npmjs.org/react/latest")
-    assert not ledger.take_pass("https://registry.npmjs.org/react/latest")
-
-
 async def test_instructions_open_with_the_rules():
-    assert server._INSTRUCTIONS.startswith("# HyperRoute — mandatory routing")
-    assert (server.mcp.instructions or "").startswith("# HyperRoute: hard rules")
+    assert server.mcp.instructions == server._INSTRUCTIONS
+    assert server._INSTRUCTIONS.startswith("# HyperRoute: hard rules")
 
 
-async def test_run_instructions_are_short():
+async def test_instructions_are_short():
     text = server.mcp.instructions or ""
     assert "run" in text and "declare_my_tool" in text and "prefer_tool" in text
-    assert len(text) < len(server._INSTRUCTIONS) / 3
+    assert "recommend" not in text and "execute" not in text
+    assert len(text) < 4000
 
 
 def _run_answer(items, run="r_1", reports=None):
@@ -425,10 +339,10 @@ async def test_an_owed_report_rides_the_next_run_and_high_stakes_hold(monkeypatc
 
 async def test_report_outcome_by_item(monkeypatch, logged_in):
     from hyperroute_mcp import ledger
-    ledger.add_run("exa", "s1", item="r_1/2")
+    ledger.add_run("exa", "r_1/2")
     c = FakeClient(run={"run": "r_9", "items": [], "reports": {"accepted": 1, "failed": []}})
     monkeypatch.setattr(server, "_client", lambda: c)
-    assert await server.report_outcome("partial", item="r_1/2", reason="missing_data") == {"ok": True}
+    assert await server.report_outcome("r_1/2", "partial", reason="missing_data") == {"ok": True}
     assert c.last("run") == {"reports": [{"item": "r_1/2", "score": "partial", "reason": "missing_data"}]}
     assert ledger.pending() == []
 
@@ -444,13 +358,13 @@ async def test_a_do_yourself_item_grants_a_pass(monkeypatch, logged_in):
 
 async def test_a_useless_report_reopens_the_item_and_grants_its_pass(monkeypatch, logged_in):
     from hyperroute_mcp import ledger
-    ledger.add_run("nominatim", "s1", item="r_1/7")
+    ledger.add_run("nominatim", "r_1/7")
     reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/7 (nominatim useless)",
                 "items": [{"action": "do_yourself", "query": "geocode 350 Fifth Avenue New York",
                            "reopens": "r_1/7"}],
                 "reports": {"accepted": 1, "failed": []}}
     monkeypatch.setattr(server, "_client", lambda: FakeClient(run=reopened))
-    out = await server.report_outcome("useless", item="r_1/7", reason="wrong_output")
+    out = await server.report_outcome("r_1/7", "useless", reason="wrong_output")
     assert out == {"ok": True, "reopened": reopened["text"]}
     assert ledger.pending() == []
     assert ledger.take_pass('{"query": "350 Fifth Avenue New York latitude"}')

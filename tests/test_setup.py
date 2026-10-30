@@ -115,7 +115,7 @@ def test_server_name_read_from_claude_json(sandbox):
 
 @pytest.mark.parametrize("payload,expected", [
     ({"tool_name": "WebSearch"}, True),
-    ({"tool_name": "mcp__hyperroute__execute"}, False),
+    ({"tool_name": "mcp__hyperroute__run"}, False),
     ({"tool_name": "mcp__ccd_turn__update_plan"}, False),
     ({"tool_name": "mcp__claude-in-chrome__navigate"}, False),
     ({"tool_name": "mcp__claude_ai_Claude_Docs__batch"}, False),
@@ -225,18 +225,19 @@ def test_guard_remind_only_by_env(monkeypatch, logged):
 
 def test_report_check_holds_the_turn_until_every_run_is_reported():
     assert hooks.output("report-check", []) is None
-    ledger.add_run("nws_weather", "s-1")
-    ledger.add_run("nws_weather", "s-1")
+    ledger.add_run("nws_weather", "r_1/1")
+    ledger.add_run("nws_weather", "r_1/2")
     first = hooks.output("report-check", [])
-    assert first["decision"] == "block" and "nws_weather" in first["reason"]
-    ledger.clear_run("nws_weather", "s-1")
+    assert first["decision"] == "block" and "r_1/1 (nws_weather)" in first["reason"]
+    assert "report_outcome(item=" in first["reason"]
+    ledger.clear_item("r_1/1")
     assert hooks.output("report-check", [])["decision"] == "block"
-    ledger.clear_run("nws_weather", "s-1")
+    ledger.clear_item("r_1/2")
     assert hooks.output("report-check", []) is None
 
 
 def test_report_check_lets_go_after_repeated_refusals():
-    ledger.add_run("nominatim", "s-2")
+    ledger.add_run("nominatim", "r_2/1")
     outs = [hooks.output("report-check", []) for _ in range(hooks.STOP_BLOCKS + 1)]
     assert all(o for o in outs[:-1]) and outs[-1] is None
 
