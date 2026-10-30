@@ -195,7 +195,8 @@ mcp = _Server("hyperroute", instructions=_INSTRUCTIONS if config.classic_verbs()
 # recommend + execute are the web demo's verbs (its ranking box reads them); every other caller
 # gets run. Defined either way so tests and the demo share one implementation.
 _classic_tool = mcp.tool() if config.classic_verbs() else (lambda f: f)
-_run_tool = (lambda f: f) if config.classic_verbs() else mcp.tool()
+# Plain text only: with a structured copy, clients show the agent {"result": "<escaped text>"}.
+_run_tool = (lambda f: f) if config.classic_verbs() else mcp.tool(structured_output=False)
 
 _session = Session()
 
