@@ -241,13 +241,10 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
 
 
 def _report_check(server: str) -> dict | None:
-    s = ledger.load()
-    if not s["pending"]:
-        return None
-    if s.get("stop_blocks", 0) >= STOP_BLOCKS:
-        return None
-    s["stop_blocks"] = s.get("stop_blocks", 0) + 1
-    ledger.save(s)
+    with ledger.edit() as s:
+        if not s["pending"] or s.get("stop_blocks", 0) >= STOP_BLOCKS:
+            return None
+        s["stop_blocks"] = s.get("stop_blocks", 0) + 1
     if config.classic_verbs():
         return {"decision": "block", "reason": (
             f"Not finished: {len(s['pending'])} tool run(s) through HyperRoute have no report yet: "

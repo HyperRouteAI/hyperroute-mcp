@@ -53,7 +53,10 @@ def _read(path: Path) -> dict:
 
 def _write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    # Write a sibling and rename it in: a reader never sees a half-written file (and reads it as empty).
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
 
 
 def record_path() -> Path:

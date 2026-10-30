@@ -4,7 +4,13 @@ import os
 import re
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:            # Windows: writes stay atomic, edits are not serialised
+    fcntl = None
 
 from . import install
 
@@ -78,11 +84,25 @@ def save(s: dict, key: str | None = None) -> None:
     p = _path(key)
     install._write(p, s)
     try:
-        for old in p.parent.glob("*.json"):
+        for old in [*p.parent.glob("*.json"), *p.parent.glob("*.lock")]:
             if time.time() - old.stat().st_mtime > STALE_SECONDS:
                 old.unlink()
     except Exception:
         pass
+
+
+@contextmanager
+def edit(key: str | None = None):
+    """Load, change and save the state under a lock. The MCP server and several hooks run at once
+    (an agent fires its outside calls in parallel); unlocked, one's save drops another's change."""
+    p = _path(key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p.with_suffix(".lock"), "a") as lock:
+        if fcntl:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        s = load(key)
+        yield s
+        save(s, key)
 
 
 def words(text) -> set[str]:
@@ -96,32 +116,28 @@ def handed_back(text: str) -> bool:
 # ---- passes: a "do it yourself" answer lets ONE outside call through, for the lookup it ranked
 
 def grant_pass(query: str) -> None:
-    s = load()
-    s["passes"].append({"until": time.time() + PASS_SECONDS, "words": sorted(words(query))})
-    save(s)
+    with edit() as s:
+        s["passes"].append({"until": time.time() + PASS_SECONDS, "words": sorted(words(query))})
 
 
 def take_pass(call_text: str) -> bool:
     """Spend a live pass whose lookup shares a distinctive word with this call."""
-    s = load()
-    now = time.time()
-    s["passes"] = [p for p in s["passes"] if p.get("until", 0) > now]
-    w = words(call_text)
-    best = max(s["passes"], key=lambda p: len(w & set(p.get("words") or [])), default=None)
-    if best is not None and w & set(best.get("words") or []):
-        # The pass most about this call is the one spent, so a pass granted for one lookup is not
-        # used up by another that merely shares a word with it.
-        s["passes"].remove(best)
-        save(s)
-        return True
-    save(s)
-    return False
+    with edit() as s:
+        now = time.time()
+        s["passes"] = [p for p in s["passes"] if p.get("until", 0) > now]
+        w = words(call_text)
+        best = max(s["passes"], key=lambda p: len(w & set(p.get("words") or [])), default=None)
+        if best is not None and w & set(best.get("words") or []):
+            # The pass most about this call is the one spent, so a pass granted for one lookup is
+            # not used up by another that merely shares a word with it.
+            s["passes"].remove(best)
+            return True
+        return False
 
 
 def note_outage() -> None:
-    s = load()
-    s["outage_until"] = time.time() + OUTAGE_SECONDS
-    save(s)
+    with edit() as s:
+        s["outage_until"] = time.time() + OUTAGE_SECONDS
 
 
 def in_outage() -> bool:
@@ -138,30 +154,27 @@ def ran(out) -> bool:
 
 
 def add_run(tool_id: str, session_id: str | None, item: str | None = None, high: bool = False) -> None:
-    s = load()
-    s["pending"].append({"tool_id": tool_id, "session_id": session_id, "item": item, "high": high,
-                         "at": time.time()})
-    s["stop_blocks"] = 0
-    save(s)
+    with edit() as s:
+        s["pending"].append({"tool_id": tool_id, "session_id": session_id, "item": item,
+                             "high": high, "at": time.time()})
+        s["stop_blocks"] = 0
 
 
 def clear_run(tool_id: str, session_id: str | None) -> None:
-    s = load()
-    for match in (lambda r: r["tool_id"] == tool_id and r.get("session_id") == session_id,
-                  lambda r: r["tool_id"] == tool_id):
-        hit = next((r for r in s["pending"] if match(r)), None)
-        if hit:
-            s["pending"].remove(hit)
-            s["stop_blocks"] = 0
-            break
-    save(s)
+    with edit() as s:
+        for match in (lambda r: r["tool_id"] == tool_id and r.get("session_id") == session_id,
+                      lambda r: r["tool_id"] == tool_id):
+            hit = next((r for r in s["pending"] if match(r)), None)
+            if hit:
+                s["pending"].remove(hit)
+                s["stop_blocks"] = 0
+                break
 
 
 def clear_item(item: str) -> None:
-    s = load()
-    s["pending"] = [r for r in s["pending"] if r.get("item") != item]
-    s["stop_blocks"] = 0
-    save(s)
+    with edit() as s:
+        s["pending"] = [r for r in s["pending"] if r.get("item") != item]
+        s["stop_blocks"] = 0
 
 
 def pending(key: str | None = None) -> list[dict]:
@@ -176,10 +189,8 @@ def describe(runs: list[dict]) -> str:
 # ---- the caller profile reference the MCP last had acknowledged, so the guard's own routes carry it
 
 def set_caller(ref: str) -> None:
-    s = load()
-    if s.get("caller") != ref:
+    with edit() as s:
         s["caller"] = ref
-        save(s)
 
 
 def caller() -> str | None:
