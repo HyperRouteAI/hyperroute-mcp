@@ -368,3 +368,10 @@ async def test_a_useless_report_reopens_the_item_and_grants_its_pass(monkeypatch
     assert out == {"ok": True, "reopened": reopened["text"]}
     assert ledger.pending() == []
     assert ledger.take_pass('{"query": "350 Fifth Avenue New York latitude"}')
+
+
+async def test_report_outcome_passes_the_users_thumbs(monkeypatch, logged_in):
+    c = FakeClient(run={"run": "r_9", "items": [], "reports": {"accepted": 1, "failed": []}})
+    monkeypatch.setattr(server, "_client", lambda: c)
+    await server.report_outcome(item="r_1/2", score="full", satisfied=True)
+    assert c.last("run") == {"reports": [{"item": "r_1/2", "score": "full", "satisfied": True}]}

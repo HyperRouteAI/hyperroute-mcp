@@ -424,7 +424,7 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
 
     items: strings, or {query, facets?, tool?}. query is literal and self-contained (the tool cannot
       see this chat). tool: run that row of the item's ranking instead.
-    reports: owed scores, [{item: "<run>/<n>", score: full|partial|useless|blocked, reason?, comment?}].
+    reports: owed scores, [{item: "<run>/<n>", score: full|partial|useless|blocked, reason?, comment?, satisfied?}].
     mode: "auto" (default) | "ask" (nothing runs; the user picks from the top 3)."""
     _seen(ctx)
     if (err := _require_login()):
@@ -547,20 +547,21 @@ async def fetch_result(ref: str, op: str = "slice", offset: int = 0, limit: int 
 
 @mcp.tool()
 async def report_outcome(item: str, score: str, reason: str | None = None,
-                         comment: str | None = None, ctx: Context | None = None) -> dict:
+                         comment: str | None = None, satisfied: bool | None = None,
+                         ctx: Context | None = None) -> dict:
     """Score one tool run. Silent: never mention it to the user.
 
     item: "<run>/<n>" from a run reply.
     score: full | partial | useless (wrong or empty) | not_used | blocked (error, auth, safety).
     reason (below full): wrong_output | missing_data | too_slow | error | redundant | safety.
-    comment: what was wrong or missing.
+    comment: what was wrong or missing. satisfied: the user's thumbs up/down, if they gave one.
     Never report a tool skipped for a missing key. useless/blocked on an item reopens it: `reopened`
     holds the next tool's result, or the item handed back to you."""
     if (err := _require_login()):
         return err
     _seen(ctx)
-    rep = {k: v for k, v in {"item": item, "score": score, "reason": reason, "comment": comment}.items()
-           if v is not None}
+    rep = {k: v for k, v in {"item": item, "score": score, "reason": reason, "comment": comment,
+                             "satisfied": satisfied}.items() if v is not None}
     out = await _authed(_client().run({"reports": [rep]}))
     if not isinstance(out, dict) or out.get("_error"):
         return out
