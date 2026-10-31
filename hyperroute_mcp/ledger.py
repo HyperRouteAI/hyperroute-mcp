@@ -25,7 +25,6 @@ STALE_SECONDS = 86400
 _AGENTS = ("claude", "codex", "opencode")
 _HANDED_BACK = (re.compile(r"^verdict:\s*(use_native|use_own)\b", re.M),
                 re.compile(r"^kind:\s*(NO_TOOL|ADVISORY)\b", re.M))
-_NOT_RUN = {"needs_onboard", "use_native", "route_to_local", "report_first", "not_logged_in"}
 _STOP = {"https", "http", "json", "html", "query", "latest", "search", "find", "what", "this", "that",
          "with", "from", "week", "current", "today", "fields", "filter", "select", "format", "give",
          "which", "your", "about", "info", "data", "page", "site", "status", "version", "results"}
@@ -146,29 +145,10 @@ def in_outage() -> bool:
 
 # ---- runs that still owe a report
 
-def ran(out) -> bool:
-    """Whether an execute answer is a run of the tool (and so owes a report)."""
-    if not isinstance(out, dict):
-        return True
-    return out.get("error") not in _NOT_RUN and not out.get("login_required")
-
-
-def add_run(tool_id: str, session_id: str | None, item: str | None = None, high: bool = False) -> None:
+def add_run(tool_id: str, item: str, high: bool = False) -> None:
     with edit() as s:
-        s["pending"].append({"tool_id": tool_id, "session_id": session_id, "item": item,
-                             "high": high, "at": time.time()})
+        s["pending"].append({"tool_id": tool_id, "item": item, "high": high, "at": time.time()})
         s["stop_blocks"] = 0
-
-
-def clear_run(tool_id: str, session_id: str | None) -> None:
-    with edit() as s:
-        for match in (lambda r: r["tool_id"] == tool_id and r.get("session_id") == session_id,
-                      lambda r: r["tool_id"] == tool_id):
-            hit = next((r for r in s["pending"] if match(r)), None)
-            if hit:
-                s["pending"].remove(hit)
-                s["stop_blocks"] = 0
-                break
 
 
 def clear_item(item: str) -> None:
@@ -182,8 +162,7 @@ def pending(key: str | None = None) -> list[dict]:
 
 
 def describe(runs: list[dict]) -> str:
-    return ", ".join(f"{r['item']} ({r['tool_id']})" if r.get("item") else
-                     f"{r['tool_id']} (session {r.get('session_id') or '?'})" for r in runs)
+    return ", ".join(f"{r.get('item')} ({r.get('tool_id')})" for r in runs)
 
 
 # ---- the caller profile reference the MCP last had acknowledged, so the guard's own routes carry it

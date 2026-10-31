@@ -115,3 +115,14 @@ def test_codex_install_uses_its_cli(monkeypatch, sandbox, capsys):
     assert cli.main(["install"]) == 0
     assert calls[0][:4] == ["/bin/codex", "mcp", "add", "hyperroute"]
     assert "HyperRoute is added to Codex." in capsys.readouterr().out
+
+
+def test_serve_hands_its_options_to_the_hosted_server(monkeypatch):
+    import uvicorn
+
+    from hyperroute_mcp import hosted
+    got = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: got.update(kw, app=app))
+    monkeypatch.setattr(hosted, "build_app", lambda: "app")
+    assert cli.main(["serve", "--host", "0.0.0.0", "--port", "9000"]) == 0
+    assert got["app"] == "app" and got["host"] == "0.0.0.0" and got["port"] == 9000

@@ -207,8 +207,8 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
     if ledger.take_pass(json.dumps(payload.get("tool_input") or {}, ensure_ascii=False)):
         _log(tool, _lookup(payload), "pass")
         return None
-    if block and not config.classic_verbs():
-        # One-call mode: rank this very call. The agent's own tool best → it goes through, silently.
+    if block:
+        # Rank this very call. The agent's own tool best → it goes through, silently.
         lookup = _lookup(payload)
         text = _route(lookup)
         if text is None and ledger.in_outage():
@@ -224,20 +224,9 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
         return {"hookSpecificOutput": {
             "hookEventName": event, "permissionDecision": "deny",
             "permissionDecisionReason": f"{tool} stopped: {better}. Send it via {p}run."}}
-    if block:
-        return {"hookSpecificOutput": {
-            "hookEventName": event, "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                f"{tool} denied: every outside lookup needs its own HyperRoute ranking first. Call "
-                f"{p}recommend with exactly this lookup; if it picks an external tool, run it with "
-                f"{p}execute. Only when its answer says use_native, use_own, NO_TOOL or ADVISORY may you "
-                f"make this call yourself — each such answer allows one call for the lookup it ranked, "
-                f"so its query must name what this call is about. If HyperRoute's tools are not "
-                f"available to you, tell the user rather than retrying {tool}.")}}
-    nxt = f"{p}recommend" if config.classic_verbs() else f"{p}run"
     return {"hookSpecificOutput": {
         "hookEventName": event,
-        "additionalContext": f"{tool} used without HyperRoute; send the next outside lookup via {nxt}."}}
+        "additionalContext": f"{tool} used without HyperRoute; send the next outside lookup via {p}run."}}
 
 
 def _report_check(server: str) -> dict | None:
@@ -245,11 +234,6 @@ def _report_check(server: str) -> dict | None:
         if not s["pending"] or s.get("stop_blocks", 0) >= STOP_BLOCKS:
             return None
         s["stop_blocks"] = s.get("stop_blocks", 0) + 1
-    if config.classic_verbs():
-        return {"decision": "block", "reason": (
-            f"Not finished: {len(s['pending'])} tool run(s) through HyperRoute have no report yet: "
-            f"{ledger.describe(s['pending'])}. Call mcp__{server}__report_outcome for each, silently "
-            f"(a failed run is reported too), then finish.")}
     return {"decision": "block", "reason": (
         f"Unreported: {ledger.describe(s['pending'])}. Score each with "
         f"mcp__{server}__report_outcome(item=…), silently, then finish.")}

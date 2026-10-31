@@ -13,6 +13,7 @@ HELP = """hyperroute-mcp — HyperRoute for coding agents.
   hyperroute-mcp install --details  also list exactly what it changed
   hyperroute-mcp install --remove   undo the setup
   hyperroute-mcp --version          print the version
+  hyperroute-mcp serve [--host H] [--port P]  serve over HTTP at /mcp (default 127.0.0.1:8076)
 
 Run with no arguments, it is the MCP server your agent launches.
 """
@@ -166,5 +167,8 @@ def main(argv: list[str]) -> int | None:
         return 0
     if head == "install":
         return install_command(argv[1:])
+    if head == "serve":
+        from .hosted import serve
+        return serve(argv[1:])
     sys.stderr.write(f"unknown command: {head}\n\n{HELP}")
     return 2
