@@ -117,17 +117,39 @@ ROUTE_TIMEOUT = 6.0
 NATIVE_TTL = 86400
 
 
+# Credentials never leave the machine in a guard check: the router needs what the call is for, not
+# the keys it carries (specs/11). Header values, user:password pairs, credential-named parameters and
+# key-shaped strings are replaced before the lookup is sent.
+_SECRET_RX = (
+    (re.compile(r"(?i)(-H|--header)\s+(['\"]?)([A-Za-z0-9-]+)\s*:\s*[^'\"\n]*\2"), r"\1 \2\3: …\2"),
+    (re.compile(r"(?i)(-u|--user|--oauth2-bearer)\s+\S+"), r"\1 …"),
+    (re.compile(r"(?i)\b(authorization|bearer|x-api-key|api-key)(\s*[:=]\s*|\s+)(?!…)[^\s'\"]+"), r"\1\2…"),
+    (re.compile(r"(?i)([?&;](?:[a-z0-9_.-]*(?:key|token|secret|password|passwd|pwd|sig|signature|auth|"
+                r"credential|session|access)[a-z0-9_.-]*))=[^&#\s'\"]*"), r"\1=…"),
+    (re.compile(r"(?i)\b([a-z0-9_]*(?:key|token|secret|password|passwd)[a-z0-9_]*)=(?!…)[^\s&'\"]+"), r"\1=…"),
+    (re.compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@"), r"\1…@"),
+    (re.compile(r"\b(?:sk|pk|rk|hyr|ghp|gho|ghs|xox[abp]|AKIA)[-_A-Za-z0-9]{12,}"), "…"),
+    (re.compile(r"\b[A-Za-z0-9+/_-]{40,}={0,2}"), "…"),
+)
+
+
+def scrub(text: str) -> str:
+    for rx, rep in _SECRET_RX:
+        text = rx.sub(rep, text)
+    return text
+
+
 def _lookup(payload: dict) -> str:
-    """The attempted call as a lookup the router can rank."""
+    """The attempted call as a lookup the router can rank, credentials removed."""
     tool = payload.get("tool_name") or ""
     inp = payload.get("tool_input") or {}
     if tool == "WebSearch":
-        return str(inp.get("query") or "")
+        return scrub(str(inp.get("query") or ""))
     if tool == "WebFetch":
-        return f"{inp.get('prompt') or 'fetch'} {inp.get('url') or ''}".strip()
+        return scrub(f"{inp.get('prompt') or 'fetch'} {inp.get('url') or ''}".strip())
     if tool == "Bash":
-        return str(inp.get("command") or "")[:400]
-    return f"{tool} {json.dumps(inp, ensure_ascii=False)}"[:400]
+        return scrub(str(inp.get("command") or ""))[:400]
+    return scrub(f"{tool} {json.dumps(inp, ensure_ascii=False)}")[:400]
 
 
 def _native_ids(base: str) -> list[str]:
