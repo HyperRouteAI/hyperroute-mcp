@@ -153,3 +153,13 @@ async def test_path_arguments_stay_in_their_segment(patched):
     assert t.request.url.raw_path == b"/result/..%2Fauth%2Ftokens%23/read"
     await c.onboard_info("__own__:a/b")
     assert t.request.url.raw_path == b"/onboard/__own__%3Aa%2Fb"
+
+
+async def test_onboard_sends_several_values_without_an_api_key(patched):
+    import json
+
+    t = patched(httpx.Response(200, json={}))
+    await HyperRouteClient("http://router.test", Session("k")).onboard(
+        "trello", None, label=None, values={"TRELLO_API_KEY": "a", "TRELLO_TOKEN": "b"})
+    assert json.loads(t.request.content) == {
+        "tool_id": "trello", "values": {"TRELLO_API_KEY": "a", "TRELLO_TOKEN": "b"}}

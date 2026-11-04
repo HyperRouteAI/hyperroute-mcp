@@ -113,9 +113,10 @@ class HyperRouteClient:
         return await self._request("GET", "/console", params={"view": "tools", "format": "json"})
     async def onboard_info(self, tool_id: str) -> Any:
         return await self._request("GET", f"/onboard/{_seg(tool_id)}", auth=True)
-    async def onboard(self, tool_id: str, api_key: str, label: str | None) -> Any:
+    async def onboard(self, tool_id: str, api_key: str | None, label: str | None,
+                      values: dict | None = None) -> Any:
         return await self._request("POST", "/onboard", auth=True,
-                                   json={"tool_id": tool_id, "api_key": api_key, "label": label})
+                                   json={"tool_id": tool_id, "api_key": api_key, "label": label, "values": values})
     async def read_result(self, ref: str, op: str, offset: int, limit: int,
                           path: list | None, query: str | None) -> Any:
         return await self._request("POST", f"/result/{_seg(ref)}/read", auth=True,

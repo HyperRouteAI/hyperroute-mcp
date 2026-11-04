@@ -69,7 +69,7 @@ which coordinator launched it and declares it; `session_info` shows what it reso
 |---|---|
 | `run` | Lookups → each ranked on its own; clear picks run, results back; owed reports ride along. |
 | `ranking` | The full ranking behind one run item (and the evidence, on request). |
-| `connect_info` / `onboard` | A tool's signup steps; save and test its API key. |
+| `connect_info` / `onboard` | A tool's signup steps; save its API key, or all its values when it needs several. |
 | `report_outcome` / `report_narrative` | Score one run item, or feedback on a whole task. |
 | `describe` | One tool's details: `about` · `price` · `facets` · `evidence`. |
 | `fetch_result` | Page through a large result. |
