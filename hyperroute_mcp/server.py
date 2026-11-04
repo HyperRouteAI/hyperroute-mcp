@@ -519,19 +519,22 @@ async def set_preferences(facets: dict, project_id: str | None = None) -> dict:
 @mcp.tool()
 async def connect_info(tool_id: str) -> dict:
     """A tool's connect steps: requires_key, connected, signup URL, steps, field. Not connected:
-    show the user the steps, ask for the key, then `onboard`."""
+    show the user the steps, ask for the key, then `onboard`. connect_mode `values`: ask for every
+    entry in `fields`. `oauth` or `unsupported`: tell the user connect_note; `onboard` refuses it."""
     if (err := _require_login()):
         return err
     return await _authed(_client().onboard_info(tool_id))
 
 
 @mcp.tool()
-async def onboard(tool_id: str, api_key: str, label: str | None = None) -> dict:
+async def onboard(tool_id: str, api_key: str | None = None, label: str | None = None,
+                  values: dict[str, str] | None = None) -> dict:
     """Save the user's API key for one tool (tested, encrypted, never leaves the server); reused on
-    every later run. Get the key from the user first."""
+    every later run. Get the key from the user first. A tool with several values (connect_mode
+    `values`) takes `values`, {field key: value} for each entry in connect_info's `fields`, not api_key."""
     if (err := _require_login()):
         return err
-    return await _authed(_client().onboard(tool_id, api_key, label=label))
+    return await _authed(_client().onboard(tool_id, api_key, label=label, values=values))
 
 
 @mcp.tool()

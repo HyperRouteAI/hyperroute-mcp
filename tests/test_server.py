@@ -1,7 +1,8 @@
+import httpx
 import pytest
 
 from hyperroute_mcp import server, tokenstore
-from hyperroute_mcp.client import Session
+from hyperroute_mcp.client import Session, _unwrap
 
 from .conftest import FakeClient
 
@@ -375,3 +376,30 @@ async def test_report_outcome_passes_the_users_thumbs(monkeypatch, logged_in):
     monkeypatch.setattr(server, "_client", lambda: c)
     await server.report_outcome(item="r_1/2", score="full", satisfied=True)
     assert c.last("run") == {"reports": [{"item": "r_1/2", "score": "full", "satisfied": True}]}
+
+
+async def test_onboard_passes_a_key_or_several_values(monkeypatch, logged_in):
+    seen = []
+
+    async def fake(self, tool_id, api_key, label=None, values=None):
+        seen.append((tool_id, api_key, label, values))
+        return {"ok": True}
+
+    monkeypatch.setattr(server.HyperRouteClient, "onboard", fake)
+    await server.onboard("omdb", "key1")
+    await server.onboard("trello", values={"TRELLO_API_KEY": "a", "TRELLO_TOKEN": "b"})
+    assert seen == [("omdb", "key1", None, None),
+                    ("trello", None, None, {"TRELLO_API_KEY": "a", "TRELLO_TOKEN": "b"})]
+
+
+async def test_onboard_surfaces_a_refusal_naming_the_fields(monkeypatch, logged_in):
+    detail = {"ok": False, "status": "invalid", "reason": "missing_values",
+              "missing": ["TRELLO_TOKEN"], "fields": ["TRELLO_API_KEY", "TRELLO_TOKEN"],
+              "message": "This tool needs these values, sent in `values`: TRELLO_API_KEY, TRELLO_TOKEN."}
+
+    async def fake(self, tool_id, api_key, label=None, values=None):
+        return _unwrap(httpx.Response(409, json={"detail": detail}, request=httpx.Request("POST", "http://t/")))
+
+    monkeypatch.setattr(server.HyperRouteClient, "onboard", fake)
+    out = await server.onboard("trello", values={"TRELLO_API_KEY": "a"})
+    assert out["_error"] and out["missing"] == ["TRELLO_TOKEN"] and out["status"] == "invalid"
