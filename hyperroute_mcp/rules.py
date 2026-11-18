@@ -14,7 +14,8 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
 - Per item: `ran` use the result. `do it yourself` use your own tools; its brief sets depth, not
   method: when an official API, registry or the page itself holds the answer, fetch it (search only
   to find it), never settle for a snippet. A `better:` line (a stronger tool needs a key): carry on
-  with what the item says, and tell the user in one line which tool is better and by how much.
+  with what the item says, and tell the user in one line which tool is better (and by how much, if
+  the line gives a gap).
   `needs a key` (nothing you have can do it): tell the user "<tool> is best for this and needs a
   key", show the steps, ask for the key. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
   one line.
