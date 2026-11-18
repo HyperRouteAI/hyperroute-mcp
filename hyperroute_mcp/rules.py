@@ -13,9 +13,10 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
   your task list, local MCP servers, the user's connected accounts.
 - Per item: `ran` use the result. `do it yourself` use your own tools; its brief sets depth, not
   method: when an official API, registry or the page itself holds the answer, fetch it (search only
-  to find it), never settle for a snippet. `needs a key` STOP that item:
-  tell the user "<tool> is best for this and needs a key", show the steps, ask for the key; do not do
-  it another way. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
+  to find it), never settle for a snippet. A `better:` line (a stronger tool needs a key): carry on
+  with what the item says, and tell the user in one line which tool is better and by how much.
+  `needs a key` (nothing you have can do it): tell the user "<tool> is best for this and needs a
+  key", show the steps, ask for the key. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
   one line.
 - "report this one": send a score in `reports` on your next `run`, or `{p}report_outcome(item=…)`
   before finishing. "report only if wrong": report only then. Reports are silent. A wrong or empty

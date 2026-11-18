@@ -124,7 +124,7 @@ def test_hosted_instructions_lead_with_run_and_drop_local_pieces():
 
 def test_run_description_carries_the_routing_rule():
     doc = server.run.__doc__ or ""
-    assert "Every outside lookup" in doc and "needs a key = stop" in doc
+    assert "Every outside lookup" in doc and "needs a key = nothing usable" in doc
 
 
 def _hosted(script: str, tmp_path) -> dict:
