@@ -35,10 +35,28 @@ _GUARD = """- Or call your own tool directly: HyperRoute checks it first, allows
 """
 
 
+# Lite mode (HYPERROUTE_LITE=1): about 100 tokens and three tools, for agents that want HyperRoute's
+# routing and nothing else on their path. The full rules above stay the default.
+_LITE = """HyperRoute: send each outside lookup (web search, page, API) as one item to `{p}run`; batch
+them in one call. `ran`: use the result. `do it yourself`: use your own tools, as deep as its brief
+says. A page that refused you on such an item: report it `blocked` in your next run's `reports`.
+`needs a key`: tell the user. A `better:` line: tell the user in one line. Never put the user's details
+in a query."""
+
+
+def lite() -> bool:
+    import os
+    return os.environ.get("HYPERROUTE_LITE", "").strip() in ("1", "true", "yes")
+
+
 def text(server: str = "hyperroute") -> str:
+    if lite():
+        return _LITE.format(p=f"mcp__{server}__")
     return _RULES.format(p=f"mcp__{server}__", guard=_GUARD)
 
 
 def plain(guard: bool = True) -> str:
     """The same rules naming the tools without a client-specific prefix."""
+    if lite():
+        return _LITE.format(p="")
     return _RULES.format(p="", guard=_GUARD if guard else "")

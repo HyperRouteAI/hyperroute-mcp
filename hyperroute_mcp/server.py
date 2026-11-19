@@ -34,6 +34,8 @@ A `note:` line is for the user: pass it on in one line."""
 def instructions(hosted: bool = False) -> str:
     """The server instructions. Hosted: no login, setup or guard (the client signs in, nothing is
     installed on the user's machine)."""
+    if rules.lite():
+        return rules.plain()
     if hosted:
         return "\n\n".join((rules.plain(guard=False), _SHARED))
     return "\n\n".join((rules.plain(), _LOGIN, _SHARED, _SETUP))
@@ -716,3 +718,20 @@ async def unprefer_tool(tool_id: str) -> dict:
     if (err := _require_login()):
         return err
     return await _authed(_client().delete_preferred_tool(tool_id))
+
+
+# Lite mode: only what routing needs on the agent's path (rules.lite). Everything else stays in the
+# full plugin; a user who wants it unsets HYPERROUTE_LITE.
+LITE_TOOLS = ("run", "report_outcome", "login")
+_LITE_RUN = ("Send outside lookups here, one item each, batched: items = strings or {query, tool?}; "
+             "reports = [{item, score: full|partial|useless|blocked, error_text?}].")
+if rules.lite():
+    for _t in [t.name for t in mcp._tool_manager.list_tools()] if hasattr(mcp, "_tool_manager") else []:
+        if _t not in LITE_TOOLS:
+            mcp.remove_tool(_t)
+    for _fn, _desc in ((run, _LITE_RUN),
+                       (report_outcome, "Score an item after finishing: item, score, reason?."),
+                       (login, "Sign in with the user's email and password, once.")):
+        mcp.remove_tool(_fn.__name__)
+        mcp.add_tool(_fn, name=_fn.__name__, description=_desc,
+                     structured_output=False if _fn is run else None)
