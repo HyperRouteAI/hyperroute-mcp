@@ -213,9 +213,10 @@ def test_guard_never_blocks_when_logged_out_or_hyperroute_is_down(monkeypatch, l
     ledger.note_outage()
     assert hooks.output("web-guard", ["--block"], search) is None
     monkeypatch.setattr(ledger, "in_outage", lambda: False)
+    # logged out routes as a trial (server specs/60): the guard ranks the call exactly as logged in
     monkeypatch.setattr(hooks, "logged_in", lambda: False)
-    out = hooks.output("web-guard", ["--block"], search)
-    assert not _deny(out) and "not logged in" in out["hookSpecificOutput"]["additionalContext"]
+    monkeypatch.setattr(hooks, "_route", lambda q: "session: s\nkind:    NO_TOOL — nothing here\nact: x")
+    assert not _deny(hooks.output("web-guard", ["--block"], search))   # handed back: the call goes on
 
 
 def test_guard_remind_only_by_env(monkeypatch, logged):
@@ -256,10 +257,11 @@ def test_widened_piece_needs_fresh_consent(monkeypatch):
 def test_hooks_say_log_in_first_when_logged_out(monkeypatch):
     monkeypatch.setattr(hooks, "logged_in", lambda: False)
     s = hooks.output("session-start", [])["hookSpecificOutput"]["additionalContext"]
-    assert s.startswith("HyperRoute is not logged in yet") and "mcp__hyperroute__use_token" in s
+    assert s.startswith("HyperRoute works without logging in") and "mcp__hyperroute__use_token" in s
+    assert "never block" in s
     monkeypatch.setattr(hooks, "logged_in", lambda: True)
     s = hooks.output("session-start", [])["hookSpecificOutput"]["additionalContext"]
-    assert "not logged in" not in s
+    assert "without logging in" not in s
 
 
 def test_the_pass_most_about_the_call_is_spent():

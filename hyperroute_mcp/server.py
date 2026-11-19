@@ -13,8 +13,8 @@ from . import agents, config, install, ledger, native, rules, tokenstore
 from .caller import Caller
 from .client import HyperRouteClient, Session
 
-_LOGIN = """Login: nothing routes until the user logs in; a call before that says how. The login persists;
-re-ask only on a 401."""
+_LOGIN = """Login: `run` works without one, as a trial with a daily item budget. Logging in keeps keys,
+own tools and preferences; offer it once, never block on it. The login persists; re-ask only on a 401."""
 
 _SHARED = """The user's own tools: "I have my own X, use it for Y" → `declare_my_tool` with their sentence
 verbatim as `triggers` (keep every condition; ask for it if they gave none). Never declare on your own.
@@ -429,7 +429,9 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
     reports: owed scores, [{item: "<run>/<n>", score: full|partial|useless|blocked, reason?, comment?, satisfied?}].
     mode: "auto" (default) | "ask" (nothing runs; the user picks from the top 3)."""
     _seen(ctx)
-    if (err := _require_login()):
+    # No login is a trial, not a stop (server specs/60 "Run without signing up"); hosted clients
+    # always sign in, so a missing sign-in there is a broken connection.
+    if _HOSTED and (err := _require_login()):
         return "STOP: " + err["message"] + " Do not do this task another way meanwhile."
     reps = [_report(r) for r in reports or []]
     sent = {r.get("item") for r in reps}

@@ -98,12 +98,6 @@ async def test_gated_tools_refuse_when_logged_out(monkeypatch, call):
     assert out["_error"] and "not logged in" in out["message"].lower()
 
 
-async def test_run_refuses_when_logged_out(fake, monkeypatch):
-    monkeypatch.setattr(server, "_session", Session())
-    out = await server.run(["q"])
-    assert out.startswith("STOP") and "use_token" in out and "`login`" in out and "login_link" not in out
-
-
 async def _answer(value):
     return value
 
@@ -403,3 +397,10 @@ async def test_onboard_surfaces_a_refusal_naming_the_fields(monkeypatch, logged_
     monkeypatch.setattr(server.HyperRouteClient, "onboard", fake)
     out = await server.onboard("trello", values={"TRELLO_API_KEY": "a"})
     assert out["_error"] and out["missing"] == ["TRELLO_TOKEN"] and out["status"] == "invalid"
+
+
+
+async def test_run_works_logged_out_as_a_trial(monkeypatch, fake):
+    monkeypatch.setattr(server, "_session", Session())
+    out = await server.run(["weather in sydney"])
+    assert not out.startswith("STOP") and fake.last("run")["items"]

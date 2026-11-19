@@ -90,10 +90,10 @@ def logged_in() -> bool:
 def login_first(server: str) -> str:
     p = f"mcp__{server}__"
     return (
-        "HyperRoute is not logged in yet, so it cannot route anything. Before doing ANY outside task, "
-        "stop and ask the user to log in to HyperRoute, and do not do the task another way meanwhile. "
-        "Two ways: they paste the login line from https://hyperroute.io (Connect, MCP tab, step 2) and "
-        f"you call `{p}use_token` with its token; or they give you their email and password for "
+        "HyperRoute works without logging in: `run` routes as a trial, with a daily item budget. "
+        "Logging in keeps keys, the user's own tools and preferences; offer it once, never block on "
+        "it. Two ways: they paste the login line from https://hyperroute.io (Connect, MCP tab, step 2) "
+        f"and you call `{p}use_token` with its token; or they give you their email and password for "
         f"`{p}login` (tell them you will see the password)."
     )
 
@@ -219,10 +219,6 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
         return None
     tool = payload.get("tool_name") or "this tool"
     p = f"mcp__{server}__"
-    if not logged_in():
-        # Routing is impossible until login: never block, only say so.
-        return {"hookSpecificOutput": {"hookEventName": event,
-                                       "additionalContext": login_first(server)}}
     if ledger.in_outage():
         return None
     # A "do it yourself" answer for THIS lookup lets exactly one call through.
