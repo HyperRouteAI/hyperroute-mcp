@@ -199,3 +199,11 @@ def test_hosted_requests_keep_accounts_apart_and_keep_no_ledger(tmp_path):
     assert sorted(got["seen"]) == ["hyr_a", "hyr_a", "hyr_a", "hyr_b", "hyr_b"]
     assert got["anon"] == 401
     assert got["state"] == []                                        # no ledger written
+
+
+def test_rules_carry_on_past_better_and_stop_only_on_needs_a_key():
+    from hyperroute_mcp import rules
+    text = rules._RULES
+    assert "`better:` line" in text and "carry on" in text
+    i = text.index("`needs a key`")
+    assert "STOP that item" in text[i:i + 200] and "do not do it another way" in text[i:i + 300]
