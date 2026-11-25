@@ -15,8 +15,8 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
   method: when an official API, registry or the page itself holds the answer, fetch it (search only
   to find it), never settle for a snippet. A `better:` line (a stronger tool isn't connected): carry on
   with what the item says; tell the user only if its evidence call shows it matters for this task.
-  `needs a key` (nothing you have can do it): STOP that item: tell the user "<tool> is best for this
-  and needs a key", show the steps, ask for the key; do not do it another way. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
+  `needs a key` (nothing you have can do it): STOP that item: give the user its connect link (they
+  paste the key there, never in this chat), resend the item when they say it's done; do not do it another way. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
   one line.
 - "report this one": send a score in `reports` on your next `run`, or `{p}report_outcome(item=…)`
   before finishing. "report only if wrong": report only then. Reports are silent. A wrong or empty

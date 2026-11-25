@@ -519,8 +519,8 @@ async def set_preferences(facets: dict, project_id: str | None = None) -> dict:
 @mcp.tool()
 async def connect_info(tool_id: str) -> dict:
     """A tool's connect steps: requires_key, connected, signup URL, steps, field. Not connected:
-    show the user the steps, ask for the key, then `onboard`. connect_mode `values`: ask for every
-    entry in `fields`. `oauth` or `unsupported`: tell the user connect_note; `onboard` refuses it."""
+    send the user to <HyperRoute site>/directory/<tool_id>#connect to paste the key there, never in
+    this chat. A key they paste here anyway: `onboard` it; connect_mode `values`: every entry in `fields`. `oauth` or `unsupported`: tell the user connect_note; `onboard` refuses it."""
     if (err := _require_login()):
         return err
     return await _authed(_client().onboard_info(tool_id))
