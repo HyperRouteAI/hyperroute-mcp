@@ -472,7 +472,7 @@ def _absorb(out: dict, reps: list[dict]) -> str:
 @mcp.tool(structured_output=False)
 async def ranking(run: str, item: int, evidence: bool = False) -> str | dict:
     """The full ranking behind one run item: top 10, why each placed, confidence. evidence=true adds
-    the probes behind the top 5 scores."""
+    the probes behind the top 5 scores, and on an item with a better: line also that tool and the one used."""
     if (err := _require_login()):
         return err
     out = await _authed(_client().ranking(run, item, evidence))
