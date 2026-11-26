@@ -88,9 +88,8 @@ run r_7f3a
 [1] frankfurter [settled, conf high; report if wrong]
   {"date":"2023-01-02","rates":{"JPY":130.92}}
 [2] do it yourself
-[3] needs a key: sonar_deep_research is best. STOP; ask the user (signup https://…)
-  1. Create an account …
-  then onboard('sonar_deep_research', <key>) and resend this item
+[3] needs a key: sonar_deep_research is best. STOP; ask the user to connect it at https://hyperroute.io/directory/sonar_deep_research#connect (the key goes to HyperRoute, not this chat), and resend this item when they say it is done
+  a key pasted here anyway: onboard('sonar_deep_research', <key>)
 owed: r_7f3a/4 → reports=[{item, score}] on next run
 ```
 

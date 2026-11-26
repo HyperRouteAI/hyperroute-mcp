@@ -420,7 +420,7 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
     """Every outside lookup (search, page, third-party API) goes here; never do one yourself first.
     Each item is ranked on its own; the best tool runs and its result returns, or the item says do
     it yourself / connect a key: do what it says (a `better:` line = carry on; tell the user only if its
-    evidence shows it matters; needs a key = nothing usable: stop, ask the user for it, never do it another way). One item per lookup; batch all known lookups in one call.
+    evidence shows it matters; needs a key = nothing usable: stop, give the user its connect link, never do it another way). One item per lookup; batch all known lookups in one call.
 
     items: strings, or {query, facets?, tool?}. query is literal and self-contained (the tool cannot
       see this chat). tool: run that row of the item's ranking instead.
