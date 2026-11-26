@@ -178,6 +178,16 @@ def test_guard_lets_the_agents_own_tool_through_when_it_is_best(logged, monkeypa
     assert json.loads(log[-1])["decision"] == "allow"
 
 
+def test_guard_lets_the_call_through_when_the_better_tool_needs_a_key(logged, monkeypatch):
+    # Blocking for a tool the user cannot use leaves them with nothing (server specs/11).
+    monkeypatch.setattr(hooks, "_route", lambda q: "session: s\nverdict: interpose\n\n"
+                        "→ exa  Exa  free  needs_key  best for this.\nact: connect exa")
+    fetch = {"tool_name": "WebFetch", "tool_input": {"url": "https://news.example/post/1"}}
+    assert hooks.output("web-guard", ["--block"], fetch) is None
+    log = (install.home() / "state" / "guard.jsonl").read_text().splitlines()
+    assert json.loads(log[-1])["decision"] == "allow_no_key"
+
+
 def test_guard_names_the_better_tool(logged):
     out = hooks.output("web-guard", ["--block"], {"tool_name": "WebSearch", "tool_input": {"query": "x"}})
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]

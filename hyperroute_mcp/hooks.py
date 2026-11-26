@@ -201,6 +201,13 @@ def _best(text: str) -> tuple[str, str]:
     return "", ""
 
 
+def _needs_key(text: str) -> bool:
+    for line in text.splitlines():
+        if line.startswith("→ "):
+            return "needs_key" in re.split(r"\s{2,}", line[2:].strip())
+    return False
+
+
 def _log(tool: str, lookup: str, decision: str, best: str = "") -> None:
     """One line per guard decision, for whoever audits a session: the agent never sees it."""
     import time
@@ -240,6 +247,9 @@ def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
             _log(tool, lookup, "allow")
             return None
         best, why = _best(text or "")
+        if best and _needs_key(text or ""):
+            _log(tool, lookup, "allow_no_key", best)
+            return None
         _log(tool, lookup, "deny", best)
         better = f"{best} is better for this" + (f" ({why.rstrip('.')})" if why else "") if best else \
             "this lookup needs a HyperRoute ranking"
