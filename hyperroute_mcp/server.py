@@ -442,12 +442,10 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
 
 
 def _absorb(out: dict, reps: list[dict]) -> str:
-    """Book a run reply into the ledger: clear the reports it accepted, owe the reports its items
+    """Book a run reply into the ledger: clear the reports it answered, owe the reports its items
     ask for. Returns the reply text."""
-    reports = out.get("reports") or {}
-    failed = set(reports.get("failed") or []) - set(reports.get("lost") or [])
     for r in reps:
-        if r.get("item") and r["item"] not in failed:
+        if r.get("item"):
             _ledger.clear_item(r["item"])
     rid = out.get("run")
     for n, it in enumerate(out.get("items") or [], 1):
@@ -543,11 +541,11 @@ async def report_outcome(item: str, score: str, reason: str | None = None,
 
     item: "<run>/<n>" from a run reply.
     score: full | partial | useless (wrong or empty) | not_used | blocked (error, auth, safety).
-    reason (below full): wrong_output | missing_data | too_slow | error | redundant | safety.
+    reason (below full): wrong_output | missing_data | too_slow | error | redundant | safety | declined (you or your user chose not to use it; any reason).
     comment: what was wrong or missing. satisfied: the user's thumbs up/down, if they gave one.
     Never report a tool skipped for a missing key. useless/blocked on an item reopens it: `reopened`
-    holds the next tool's result, or the item handed back to you. `lost`: the item is no longer on
-    file; `next` says what to do."""
+    holds the next tool's result, or the item handed back to you, also when `not_recorded`. `lost`:
+    the item is no longer on file; `next` says what to do."""
     if (err := _require_login()):
         return err
     _seen(ctx)
@@ -557,14 +555,13 @@ async def report_outcome(item: str, score: str, reason: str | None = None,
     if not isinstance(out, dict) or out.get("_error"):
         return out
     reports = out.get("reports") or {}
-    if item in (reports.get("lost") or []):
-        _ledger.clear_item(item)
-        return {"ok": False, "error": "lost", "item": item, "next": out.get("text") or ""}
-    if item in (reports.get("failed") or []):
-        return {"ok": False, "error": "unknown item", "item": item}
     text = _absorb(out, [rep])
-    # A useless/blocked score reopens the item: what runs next, or the item handed back.
-    return {"ok": True, "reopened": text} if out.get("items") else {"ok": True}
+    if item in (reports.get("lost") or []):
+        return {"ok": False, "error": "lost", "item": item, "next": text}
+    recorded = item not in (reports.get("failed") or [])
+    if out.get("items"):
+        return {"ok": True, "reopened": text, **({} if recorded else {"not_recorded": True})}
+    return {"ok": True} if recorded else {"ok": False, "error": "unknown item", "item": item}
 
 
 @mcp.tool()

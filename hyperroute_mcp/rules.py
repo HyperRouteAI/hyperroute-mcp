@@ -15,6 +15,7 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
   method: when an official API, registry or the page itself holds the answer, fetch it (search only
   to find it), never settle for a snippet. A `better:` line (a stronger tool isn't connected): carry on
   with what the item says; tell the user only if its evidence call shows it matters for this task.
+  `better: we are out of tools`: tell the user in one line.
   `needs a key` (nothing you have can do it): STOP that item: give the user its connect link (they
   paste the key there, never in this chat), resend the item when they say it's done; do not do it another way. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
   one line. `no tool, for r_x/n`: nothing is left: mark the fact not checked; tell the user in one line.
@@ -22,7 +23,8 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
   before finishing. "report only if wrong": report only then. Reports are silent. A wrong or empty
   result: report it `useless` (`blocked` if it errored); the reply brings the next tool's result or
   hands the item to you ("for r_x/n"). Your own tools refused or the page gone on a `do it yourself`
-  item: report it `blocked`; the reply brings the next step. Never resend a lookup a tool just got
+  item: report it `blocked`; you or your user won't do it yourself, for any reason: `blocked`, reason
+  `declined`. The reply brings the next step. Never resend a lookup a tool just got
   wrong, unless the reply says to (`resend`, no longer on file).
 - Never put the user's email, name, account or token in an outside request.
 - State only what a tool result showed; mark the rest "not verified".

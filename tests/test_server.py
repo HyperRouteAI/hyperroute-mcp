@@ -362,7 +362,7 @@ async def test_a_useless_report_reopens_the_item(monkeypatch, logged_in):
 
 
 async def test_a_blocked_handback_reopens_with_where_to_look(monkeypatch, logged_in):
-    reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/3 (your tool was blocked: take the "
+    reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/3 (your own tools were blocked: take the "
                                       "same fact from another official source)",
                 "items": [{"action": "do_yourself", "query": "greater sydney population 2024", "reopens": "r_1/3"}],
                 "reports": {"accepted": 1, "failed": [], "lost": []}}
@@ -435,3 +435,15 @@ async def test_onboard_surfaces_a_refusal_naming_the_fields(monkeypatch, logged_
     monkeypatch.setattr(server.HyperRouteClient, "onboard", fake)
     out = await server.onboard("trello", values={"TRELLO_API_KEY": "a"})
     assert out["_error"] and out["missing"] == ["TRELLO_TOKEN"] and out["status"] == "invalid"
+
+
+async def test_a_report_not_recorded_still_brings_the_next_step_and_is_owed_no_more(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    ledger.add_run("exa", "r_1/3")
+    reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/3 (your own tools were blocked: ...)",
+                "items": [{"action": "do_yourself", "query": "q", "reopens": "r_1/3"}],
+                "reports": {"accepted": 0, "failed": ["r_1/3"], "lost": []}}
+    monkeypatch.setattr(server, "_client", lambda: FakeClient(run=reopened))
+    out = await server.report_outcome("r_1/3", "blocked")
+    assert out == {"ok": True, "reopened": reopened["text"], "not_recorded": True}
+    assert ledger.pending() == []

@@ -13,9 +13,7 @@ except ImportError:            # Windows: writes stay atomic, edits are not seri
 
 from . import install
 
-# One agent session's routing state, shared by the MCP server and the hooks it installed: the runs
-# that still need a report. Keyed by the agent's own process, which is an ancestor of both the MCP
-# server and every hook, so two sessions on one machine never see each other's state.
+# One agent session's runs that still need a report, keyed by the agent's own process.
 
 STALE_SECONDS = 86400
 _AGENTS = ("claude", "codex", "opencode")
@@ -82,8 +80,7 @@ def save(s: dict, key: str | None = None) -> None:
 
 @contextmanager
 def edit(key: str | None = None):
-    """Load, change and save the state under a lock. The MCP server and its hooks run at once;
-    unlocked, one's save drops another's change."""
+    """Load, change and save the state under a lock."""
     p = _path(key)
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p.with_suffix(".lock"), "a") as lock:

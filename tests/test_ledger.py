@@ -11,8 +11,6 @@ def _owe(home: str, n: int) -> None:
 
 
 def test_parallel_edits_keep_every_owed_report():
-    # The MCP server and its hooks edit the shared state at once. Unlocked, a half-written file
-    # read as empty dropped owed reports.
     home = os.environ["HYPERROUTE_HOME"]
     ctx = mp.get_context("fork")
     procs = [ctx.Process(target=_owe, args=(home, n)) for n in range(8)]
