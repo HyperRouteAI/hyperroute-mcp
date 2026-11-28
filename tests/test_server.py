@@ -284,12 +284,12 @@ async def test_setup_plans_then_removes(fake, logged_in, monkeypatch, tmp_path):
     monkeypatch.setenv("HYPERROUTE_HOME", str(tmp_path / "hr"))
     monkeypatch.setattr(server, "_product", lambda ctx: "claude_code")
     plan = await server.setup()
-    assert plan["changes"] == 4 and "apply=true" in plan["next"]
+    assert plan["changes"] == 3 and "apply=true" in plan["next"]
     done = await server.setup(apply=True, confirmed=True)
     assert done["applied"] is True and done["approved_by"] == "chat"
     assert (await server.setup(remove=True))["would_remove"]
     assert sorted((await server.setup(remove=True, apply=True))["removed"]) == [
-        "report-check", "session-start", "subagent-start", "web-guard"]
+        "report-check", "session-start", "subagent-start"]
 
 
 async def test_instructions_open_with_the_rules():
@@ -348,16 +348,7 @@ async def test_report_outcome_by_item(monkeypatch, logged_in):
     assert ledger.pending() == []
 
 
-async def test_a_do_yourself_item_grants_a_pass(monkeypatch, logged_in):
-    from hyperroute_mcp import ledger
-    c = FakeClient(run=_run_answer([{"action": "do_yourself", "query": "latest react version"}]))
-    monkeypatch.setattr(server, "_client", lambda: c)
-    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
-    await server.run(["latest react version"])
-    assert ledger.take_pass('{"query": "react latest version"}')
-
-
-async def test_a_useless_report_reopens_the_item_and_grants_its_pass(monkeypatch, logged_in):
+async def test_a_useless_report_reopens_the_item(monkeypatch, logged_in):
     from hyperroute_mcp import ledger
     ledger.add_run("nominatim", "r_1/7")
     reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/7 (nominatim useless)",
@@ -368,7 +359,48 @@ async def test_a_useless_report_reopens_the_item_and_grants_its_pass(monkeypatch
     out = await server.report_outcome("r_1/7", "useless", reason="wrong_output")
     assert out == {"ok": True, "reopened": reopened["text"]}
     assert ledger.pending() == []
-    assert ledger.take_pass('{"query": "350 Fifth Avenue New York latitude"}')
+
+
+async def test_a_blocked_handback_reopens_with_where_to_look(monkeypatch, logged_in):
+    reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/3 (your own tools were blocked: take the "
+                                      "same fact from another official source)",
+                "items": [{"action": "do_yourself", "query": "greater sydney population 2024", "reopens": "r_1/3"}],
+                "reports": {"accepted": 1, "failed": [], "lost": []}}
+    monkeypatch.setattr(server, "_client", lambda: FakeClient(run=reopened))
+    out = await server.report_outcome("r_1/3", "blocked", reason="error")
+    assert out == {"ok": True, "reopened": reopened["text"]}
+
+
+async def test_the_end_after_a_block_and_a_resend_owe_no_report(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    items = [{"action": "no_tool", "query": "q one", "reopens": "r_1/3"},
+             {"action": "resend", "tool": "exa", "query": None, "reopens": "r_1/4"}]
+    monkeypatch.setattr(server, "_client", lambda: FakeClient(run=_run_answer(items)))
+    monkeypatch.setattr(server, "_client_name", lambda ctx=None: "claude-code")
+    await server.run(["q one"])
+    assert ledger.pending() == []
+
+
+async def test_a_report_on_an_item_no_longer_on_file_is_owed_no_more(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    ledger.add_run("exa", "r_old/1")
+    ledger.add_run("exa", "r_old/2")
+    text = "run r_9\nreports: 0 accepted\nr_old/1: no longer on file (runs are kept 24 h)."
+    lost = {"run": "r_9", "items": [], "text": text,
+            "reports": {"accepted": 0, "failed": ["r_old/1"], "lost": ["r_old/1"]}}
+    monkeypatch.setattr(server, "_client", lambda: FakeClient(run=lost))
+    out = await server.report_outcome("r_old/1", "blocked")
+    assert out == {"ok": False, "error": "lost", "item": "r_old/1", "next": text}
+    assert [r["item"] for r in ledger.pending()] == ["r_old/2"]
+
+
+def test_owed_reports_older_than_a_day_are_dropped(logged_in):
+    from hyperroute_mcp import ledger
+    ledger.add_run("exa", "r_1/1")
+    with ledger.edit() as s:
+        s["pending"][0]["at"] -= ledger.STALE_SECONDS + 1
+    ledger.add_run("exa", "r_2/1")
+    assert [r["item"] for r in ledger.pending()] == ["r_2/1"]
 
 
 async def test_report_outcome_passes_the_users_thumbs(monkeypatch, logged_in):
@@ -403,3 +435,15 @@ async def test_onboard_surfaces_a_refusal_naming_the_fields(monkeypatch, logged_
     monkeypatch.setattr(server.HyperRouteClient, "onboard", fake)
     out = await server.onboard("trello", values={"TRELLO_API_KEY": "a"})
     assert out["_error"] and out["missing"] == ["TRELLO_TOKEN"] and out["status"] == "invalid"
+
+
+async def test_a_report_not_recorded_still_brings_the_next_step_and_is_owed_no_more(monkeypatch, logged_in):
+    from hyperroute_mcp import ledger
+    ledger.add_run("exa", "r_1/3")
+    reopened = {"run": "r_9", "text": "run r_9\n[1] do it yourself, for r_1/3 (your own tools were blocked: ...)",
+                "items": [{"action": "do_yourself", "query": "q", "reopens": "r_1/3"}],
+                "reports": {"accepted": 0, "failed": ["r_1/3"], "lost": []}}
+    monkeypatch.setattr(server, "_client", lambda: FakeClient(run=reopened))
+    out = await server.report_outcome("r_1/3", "blocked")
+    assert out == {"ok": True, "reopened": reopened["text"], "not_recorded": True}
+    assert ledger.pending() == []

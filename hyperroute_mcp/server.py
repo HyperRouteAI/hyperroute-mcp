@@ -32,10 +32,10 @@ A `note:` line is for the user: pass it on in one line."""
 
 
 def instructions(hosted: bool = False) -> str:
-    """The server instructions. Hosted: no login, setup or guard (the client signs in, nothing is
+    """The server instructions. Hosted: no login or setup (the client signs in, nothing is
     installed on the user's machine)."""
     if hosted:
-        return "\n\n".join((rules.plain(guard=False), _SHARED))
+        return "\n\n".join((rules.plain(), _SHARED))
     return "\n\n".join((rules.plain(), _LOGIN, _SHARED, _SETUP))
 
 
@@ -287,7 +287,7 @@ def _needs_confirmation(tool: str, extra: str = "") -> str:
             f"`{tool}` again with confirmed=true{extra}.")
 
 
-async def _setup(ctx: Context | None, apply: bool, block_web: bool, confirmed: bool = False) -> dict:
+async def _setup(ctx: Context | None, apply: bool, confirmed: bool = False) -> dict:
     product = _product(ctx)
     health = await _setup_health()
     out: dict = {"agent": product or _client_name(ctx) or "unknown", "health": health}
@@ -298,15 +298,14 @@ async def _setup(ctx: Context | None, apply: bool, block_web: bool, confirmed: b
         return out
     opt = agents.OPTIONS[product]
     cwd = os.getcwd()
-    plan = opt["plan"](block_web, cwd)
+    plan = opt["plan"](cwd)
     pending = [s for s in plan["steps"] if s["state"] != "installed"]
     if not apply:
         out["plan"] = _describe_plan(plan)
         out["changes"] = len(pending)
         out["next"] = ("Nothing to change." if not pending else
                        "Explain this plan to the user in plain words. Only if they agree, call "
-                       "`setup` again with apply=true"
-                       + (" and block_web=true." if block_web else "."))
+                       "`setup` again with apply=true.")
         if not health["logged_in"]:
             out["login"] = ("Not logged in: after setup, ask for the login line from hyperroute.io "
                             "(Connect, step 2) and call `use_token`.")
@@ -321,9 +320,9 @@ async def _setup(ctx: Context | None, apply: bool, block_web: bool, confirmed: b
             return out
         if ok is None and not confirmed:
             out["applied"] = False
-            out["message"] = _needs_confirmation("setup", ", apply=true" + (", block_web=true" if block_web else ""))
+            out["message"] = _needs_confirmation("setup", ", apply=true")
             return out
-        plan = opt["apply"](block_web, cwd)
+        plan = opt["apply"](cwd)
         out["approved_by"] = "prompt" if ok else "chat"
     out["applied"] = True
     out["plan"] = _describe_plan(plan)
@@ -336,28 +335,22 @@ async def _setup(ctx: Context | None, apply: bool, block_web: bool, confirmed: b
 
 @mcp.tool()
 async def setup(apply: bool = False, upgrade: bool = False, remove: bool = False,
-                block_web: bool | None = None, confirmed: bool = False,
-                ctx: Context | None = None) -> dict:
+                confirmed: bool = False, ctx: Context | None = None) -> dict:
     """Set up, check, upgrade or remove HyperRoute here. No flags: report and return a plan, change
     nothing; show it to the user. apply=true installs, upgrade=true upgrades, remove=true + apply=true
-    undoes; each only on the user's yes. block_web=false: guard only reminds (only if the user asks).
-    confirmed=true: only after this tool asked and the user said yes in chat."""
+    undoes; each only on the user's yes. confirmed=true: only after this tool asked and the user said yes in chat."""
     _seen(ctx)
     product = _product(ctx)
     if remove:
         if not agents.supported(product):
             return {"agent": product or "unknown", "removed": []}
         if not apply:
-            plan = agents.OPTIONS[product]["plan"](False, os.getcwd())
+            plan = agents.OPTIONS[product]["plan"](os.getcwd())
             return {"agent": product,
                     "would_remove": [s["piece"] for s in plan["steps"] if s["state"] != "add"],
                     "next": "Only if the user agrees, call `setup` again with remove=true and apply=true."}
         return agents.OPTIONS[product]["remove"]()
-    if block_web is None:
-        entry = install.load_record()["agents"].get(product or "") or {}
-        block_web = bool((entry.get("options") or {}).get("block_web", agents.BLOCK_DEFAULT)
-                         if entry.get("pieces") else agents.BLOCK_DEFAULT)
-    out = await _setup(ctx, apply, block_web, confirmed=confirmed)
+    out = await _setup(ctx, apply, confirmed=confirmed)
     if agents.supported(product):
         out["repaired"] = agents.OPTIONS[product]["repair"]()
     if upgrade:
@@ -437,11 +430,7 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
                 "their scores in `reports` (silently), then run again.")
     payload = {"items": [_item(x) for x in items or []], "reports": reps, "mode": mode,
                "context": await _native_context(ctx, None)}
-    try:
-        out = await _authed(_client().run(payload))
-    except Exception:
-        _ledger.note_outage()
-        raise
+    out = await _authed(_client().run(payload))
     if not isinstance(out, dict) or out.get("_error"):
         return _as_text(out)
     text = _absorb(out, reps)
@@ -453,19 +442,15 @@ async def run(items: list, reports: list | None = None, mode: str = "auto",
 
 
 def _absorb(out: dict, reps: list[dict]) -> str:
-    """Book a run reply into the ledger: clear the reports it accepted, owe the reports its items
-    ask for, and let one own call through for each item handed back (including one a negative
-    report reopened). Returns the reply text."""
-    failed = set((out.get("reports") or {}).get("failed") or [])
+    """Book a run reply into the ledger: clear the reports it answered, owe the reports its items
+    ask for. Returns the reply text."""
     for r in reps:
-        if r.get("item") and r["item"] not in failed:
+        if r.get("item"):
             _ledger.clear_item(r["item"])
     rid = out.get("run")
     for n, it in enumerate(out.get("items") or [], 1):
         if it.get("report") == "always":
             _ledger.add_run(it.get("tool") or "", f"{rid}/{n}", high=it.get("stakes") == "high")
-        if it.get("action") == "do_yourself":
-            _ledger.grant_pass(it.get("query") or "")
     return out.get("text") or ""
 
 
@@ -552,14 +537,15 @@ async def fetch_result(ref: str, op: str = "slice", offset: int = 0, limit: int 
 async def report_outcome(item: str, score: str, reason: str | None = None,
                          comment: str | None = None, satisfied: bool | None = None,
                          ctx: Context | None = None) -> dict:
-    """Score one tool run. Silent: never mention it to the user.
+    """Score one run item, your own tools on a do it yourself item included. Silent: never mention it to the user.
 
     item: "<run>/<n>" from a run reply.
     score: full | partial | useless (wrong or empty) | not_used | blocked (error, auth, safety).
-    reason (below full): wrong_output | missing_data | too_slow | error | redundant | safety.
+    reason (below full): wrong_output | missing_data | too_slow | error | redundant | safety | declined (you or your user chose not to use it; any reason).
     comment: what was wrong or missing. satisfied: the user's thumbs up/down, if they gave one.
     Never report a tool skipped for a missing key. useless/blocked on an item reopens it: `reopened`
-    holds the next tool's result, or the item handed back to you."""
+    holds the next tool's result, or the item handed back to you, also when `not_recorded`. `lost`:
+    the item is no longer on file; `next` says what to do."""
     if (err := _require_login()):
         return err
     _seen(ctx)
@@ -568,11 +554,14 @@ async def report_outcome(item: str, score: str, reason: str | None = None,
     out = await _authed(_client().run({"reports": [rep]}))
     if not isinstance(out, dict) or out.get("_error"):
         return out
-    if item in ((out.get("reports") or {}).get("failed") or []):
-        return {"ok": False, "error": "unknown item", "item": item}
+    reports = out.get("reports") or {}
     text = _absorb(out, [rep])
-    # A useless/blocked score reopens the item: what runs next, or the item handed back.
-    return {"ok": True, "reopened": text} if out.get("items") else {"ok": True}
+    if item in (reports.get("lost") or []):
+        return {"ok": False, "error": "lost", "item": item, "next": text}
+    recorded = item not in (reports.get("failed") or [])
+    if out.get("items"):
+        return {"ok": True, "reopened": text, **({} if recorded else {"not_recorded": True})}
+    return {"ok": True} if recorded else {"ok": False, "error": "unknown item", "item": item}
 
 
 @mcp.tool()

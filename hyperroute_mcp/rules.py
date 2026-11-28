@@ -9,35 +9,33 @@ _RULES = """# HyperRoute: hard rules (breaking one = CRITICAL FAILURE)
 - Outside lookup = web search, page fetch, third-party API, remote MCP; by any route (tool, curl,
   script). Send each via `{p}run`: one item per lookup, that lookup alone in its query. Batch every
   lookup you already need into ONE call. Never two lookups in one item.
-{guard}- Not outside (no `run`): the user's files, git with their remotes, package installs, their storage,
+- Not outside (no `run`): the user's files, git with their remotes, package installs, their storage,
   your task list, local MCP servers, the user's connected accounts.
 - Per item: `ran` use the result. `do it yourself` use your own tools; its brief sets depth, not
   method: when an official API, registry or the page itself holds the answer, fetch it (search only
   to find it), never settle for a snippet. A `better:` line (a stronger tool isn't connected): carry on
   with what the item says; tell the user only if its evidence call shows it matters for this task.
+  `better: we are out of tools`: tell the user in one line.
   `needs a key` (nothing you have can do it): STOP that item: give the user its connect link (they
   paste the key there, never in this chat), resend the item when they say it's done; do not do it another way. `no tool` / `no tested tool` do it yourself or pick a listed tool; tell the user in
-  one line.
+  one line. `no tool, for r_x/n`: nothing is left: mark the fact not checked; tell the user in one line.
 - "report this one": send a score in `reports` on your next `run`, or `{p}report_outcome(item=…)`
   before finishing. "report only if wrong": report only then. Reports are silent. A wrong or empty
   result: report it `useless` (`blocked` if it errored); the reply brings the next tool's result or
-  hands the item to you ("for r_x/n"). Never resend a lookup a tool just got wrong.
+  hands the item to you ("for r_x/n"). Your own tools refused or the page gone on a `do it yourself`
+  item: report it `blocked`; you or your user won't do it yourself, for any reason: `blocked`, reason
+  `declined`. The reply brings the next step. Never resend a lookup a tool just got
+  wrong, unless the reply says to (`resend`, no longer on file).
 - Never put the user's email, name, account or token in an outside request.
 - State only what a tool result showed; mark the rest "not verified".
 
 Why a pick, other candidates, evidence: `{p}ranking(run, n)`. Run another row: resend the item with `tool`."""
 
 
-# Only where the guard hook is installed: on a hosted client nothing checks the agent's own calls.
-_GUARD = """- Or call your own tool directly: HyperRoute checks it first, allows it when yours is best, else
-  stops it. Stopped: send that lookup via `run`. Never route around a stop.
-"""
-
-
 def text(server: str = "hyperroute") -> str:
-    return _RULES.format(p=f"mcp__{server}__", guard=_GUARD)
+    return _RULES.format(p=f"mcp__{server}__")
 
 
-def plain(guard: bool = True) -> str:
+def plain() -> str:
     """The same rules naming the tools without a client-specific prefix."""
-    return _RULES.format(p="", guard=_GUARD if guard else "")
+    return _RULES.format(p="")

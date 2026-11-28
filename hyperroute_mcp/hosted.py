@@ -94,12 +94,6 @@ class NoLedger:
     def clear_item(self, item) -> None:
         pass
 
-    def grant_pass(self, query) -> None:
-        pass
-
-    def note_outage(self) -> None:
-        pass
-
 
 class Accounts:
 
