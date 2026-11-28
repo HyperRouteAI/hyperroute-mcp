@@ -19,17 +19,12 @@ CLAUDE_PIECES = {
                       "through HyperRoute."),
     "subagent-start": ("SubagentStart", None,
                        "Tell every subagent the same thing the moment it starts."),
-    "web-guard": ("PreToolUse", "WebSearch|WebFetch|Bash|mcp__.*",
-                  "When the agent reaches outside the machine on its own (web search or fetch, a "
-                  "network command in the shell, another MCP server), remind it to route through "
-                  "HyperRoute. Local work is untouched, and when HyperRoute tells it to do a lookup "
-                  "itself, that one call goes through quietly."),
     "report-check": ("Stop", None,
                      "When the agent is about to finish while a tool HyperRoute ran has no report "
                      "yet, ask it to send the report first (at most five times in a row)."),
 }
-REVISIONS = {"session-start": 1, "subagent-start": 1, "web-guard": 2, "report-check": 1}
-BLOCK_DEFAULT = True
+REVISIONS = {"session-start": 1, "subagent-start": 1, "report-check": 1}
+RETIRED = {"web-guard": "PreToolUse"}
 
 
 def _fingerprint(s: str) -> str:
@@ -100,11 +95,12 @@ def claude_server_name(cwd: str | None = None) -> str:
     return "hyperroute"
 
 
-def _command(piece: str, server: str, block: bool) -> str:
-    args = ["--server", server]
-    if piece == "web-guard" and block:
-        args.append("--block")
-    return shlex.join(install.hook_command(piece, *args))
+def _command(piece: str, server: str) -> str:
+    return shlex.join(install.hook_command(piece, "--server", server))
+
+
+def _event(piece: str) -> str:
+    return CLAUDE_PIECES[piece][0] if piece in CLAUDE_PIECES else RETIRED[piece]
 
 
 def _entries(settings: dict, event: str) -> list:
@@ -113,10 +109,10 @@ def _entries(settings: dict, event: str) -> list:
     return groups if isinstance(groups, list) else []
 
 
-def _installed(settings: dict) -> dict:
+def _installed(settings: dict, pieces=CLAUDE_PIECES) -> dict:
     found = {}
-    for piece, (event, _m, _d) in CLAUDE_PIECES.items():
-        for group in _entries(settings, event):
+    for piece in pieces:
+        for group in _entries(settings, _event(piece)):
             for h in (group.get("hooks") or []) if isinstance(group, dict) else []:
                 if isinstance(h, dict) and _is_ours(h) and f" hook {piece}" in h["command"]:
                     found[piece] = (group.get("matcher"), h["command"])
@@ -128,7 +124,7 @@ def _strip(settings: dict, pieces: set[str]) -> dict:
     if not isinstance(hooks, dict):
         return settings
     for piece in pieces:
-        event = CLAUDE_PIECES[piece][0]
+        event = _event(piece)
         kept = []
         for group in hooks.get(event) or []:
             if not isinstance(group, dict):
@@ -157,43 +153,34 @@ def _add(settings: dict, piece: str, command: str) -> dict:
     return settings
 
 
-def claude_plan(block_web: bool = BLOCK_DEFAULT, cwd: str | None = None) -> dict:
+def claude_plan(cwd: str | None = None) -> dict:
     path = claude_settings()
     settings = _read_json(path)
     present = _installed(settings)
     server = claude_server_name(cwd)
     steps = []
     for piece, (event, matcher, desc) in CLAUDE_PIECES.items():
-        want = _command(piece, server, block_web)
+        want = _command(piece, server)
         if present.get(piece) == (matcher, want):
             state = "installed"
         elif piece in present:
             state = "update"
         else:
             state = "add"
-        d = desc
-        if piece == "web-guard" and block_web:
-            d = ("Block the agent from reaching outside the machine on its own (web search or fetch, a "
-                 "network command in the shell, another MCP server) until HyperRoute has ranked that "
-                 "lookup. Local work is untouched; when HyperRoute tells it to do a lookup itself, "
-                 "that one call goes through; while you are not logged in, or HyperRoute cannot be "
-                 "reached, it only reminds.")
-        steps.append({"piece": piece, "state": state, "what": d,
+        steps.append({"piece": piece, "state": state, "what": desc,
                       "file": str(path), "hook": event + (f" ({matcher})" if matcher else ""),
                       "command": want})
     return {"agent": "claude_code", "server": server, "file": str(path), "steps": steps}
 
 
-def claude_apply(block_web: bool = BLOCK_DEFAULT, cwd: str | None = None,
-                 pieces: set[str] | None = None) -> dict:
-    plan = claude_plan(block_web, cwd)
+def claude_apply(cwd: str | None = None, pieces: set[str] | None = None) -> dict:
+    _drop_retired()
+    plan = claude_plan(cwd)
     pieces = pieces or set(CLAUDE_PIECES)
     path = claude_settings()
-    settings = _read_json(path)
-    settings = _strip(settings, pieces)
+    settings = _strip(_read_json(path), pieces)
     record = install.load_record()
     entry = record["agents"].setdefault("claude_code", {"pieces": {}})
-    entry["options"] = {"block_web": block_web}
     for step in plan["steps"]:
         if step["piece"] not in pieces:
             continue
@@ -205,15 +192,15 @@ def claude_apply(block_web: bool = BLOCK_DEFAULT, cwd: str | None = None,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")
     install.save_record(record)
-    return claude_plan(block_web, cwd)
+    return claude_plan(cwd)
 
 
 def claude_remove() -> dict:
     path = claude_settings()
     settings = _read_json(path)
-    present = set(_installed(settings))
+    present = set(_installed(settings, [*CLAUDE_PIECES, *RETIRED]))
     if present:
-        path.write_text(json.dumps(_strip(settings, set(CLAUDE_PIECES)), indent=2) + "\n")
+        path.write_text(json.dumps(_strip(settings, set(CLAUDE_PIECES) | set(RETIRED)), indent=2) + "\n")
     record = install.load_record()
     record["agents"].pop("claude_code", None)
     install.save_record(record)
@@ -227,13 +214,30 @@ def claude_repair() -> list[str]:
         return []
     approved = {p for p, v in entry["pieces"].items()
                 if p in CLAUDE_PIECES and (v or {}).get("rev", 1) == REVISIONS[p]}
-    block = bool((entry.get("options") or {}).get("block_web"))
-    plan = claude_plan(block)
+    retired = set(_installed(_read_json(claude_settings()), RETIRED)) | (set(entry["pieces"]) & set(RETIRED))
+    plan = claude_plan()
     stale = {s["piece"] for s in plan["steps"] if s["piece"] in approved and s["state"] != "installed"}
-    if not stale:
+    if not stale and not retired:
         return []
-    claude_apply(block, pieces=stale)
-    return sorted(stale)
+    if stale:
+        claude_apply(pieces=stale)
+    else:
+        _drop_retired()
+    return sorted(stale | retired)
+
+
+def _drop_retired() -> None:
+    path = claude_settings()
+    settings = _read_json(path)
+    if _installed(settings, RETIRED):
+        path.write_text(json.dumps(_strip(settings, set(RETIRED)), indent=2) + "\n")
+    record = install.load_record()
+    entry = record["agents"].get("claude_code")
+    if entry:
+        for piece in RETIRED:
+            (entry.get("pieces") or {}).pop(piece, None)
+        entry.pop("options", None)
+        install.save_record(record)
 
 
 def claude_new_pieces() -> list[str]:

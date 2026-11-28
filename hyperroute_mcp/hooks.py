@@ -1,83 +1,16 @@
 from __future__ import annotations
 
 import json
-import os
-import re
 import sys
-from pathlib import Path
 
-from . import config, install, ledger, rules, tokenstore
+from . import config, ledger, rules, tokenstore
 
-EVENTS = {"session-start": "SessionStart", "subagent-start": "SubagentStart", "web-guard": "PreToolUse",
-          "report-check": "Stop"}
+EVENTS = {"session-start": "SessionStart", "subagent-start": "SubagentStart", "report-check": "Stop"}
 STOP_BLOCKS = 5     # end-of-turn refusals in a row with no report landing before the turn may end
 
 
 def rule(server: str) -> str:
     return rules.text(server)
-
-
-_NET = re.compile(r"\b(curl|wget|Invoke-WebRequest|iwr|httpie|aiohttp|httpx|urllib|requests\.(get|post|put|request))\b"
-                  r"|https?://", re.I)
-_URL = re.compile(r"https?://([^/\s:'\"]+)", re.I)
-_LOCAL = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"}
-# Work on the user's own things: their repos, their packages, their storage, their containers.
-_OWN_WORK = {"git", "gh", "npm", "npx", "pnpm", "yarn", "bun", "pip", "pip3", "uv", "uvx", "poetry",
-             "pipx", "conda", "cargo", "go", "brew", "apt", "apt-get", "dnf", "docker", "podman",
-             "kubectl", "helm", "ssh", "scp", "rsync", "aws", "gcloud", "gsutil", "az", "make",
-             "echo", "printf", "cat", "tee", "sed", "grep"}   # text that names a URL is not a fetch
-_SEGMENT = re.compile(r"&&|\|\||[;|\n]")
-_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-# Connectors to the user's own accounts (drive, docs, mail, chat) that the agent app provides.
-_ACCOUNT_PREFIXES = ("claude_ai_",)
-
-
-def _program(segment: str) -> str:
-    words = [w for w in segment.strip().split() if not _ASSIGN.match(w)]
-    while words and words[0] in ("sudo", "env", "/usr/bin/env", "time", "nohup", "exec"):
-        words = words[1:]
-    return os.path.basename(words[0]) if words else ""
-
-
-def _net_segment(segment: str) -> bool:
-    if _program(segment) in _OWN_WORK or not _NET.search(segment):
-        return False
-    hosts = {h.lower() for h in _URL.findall(segment)}
-    return not hosts or not hosts <= _LOCAL
-
-
-def _mcp_name(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_-]", "_", name)
-
-
-def remote_servers(cwd: str | None = None) -> set[str]:
-    """MCP servers the agent reaches over the network, by their tool-prefix name."""
-    from . import agents
-    data = agents._read_json(agents._claude_json())
-    blocks = [agents._servers(data)]
-    projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
-    if cwd and isinstance(projects.get(cwd), dict):
-        blocks.append(agents._servers(projects[cwd]))
-    if cwd:
-        blocks.append(agents._servers(agents._read_json(Path(cwd) / ".mcp.json")))
-    return {_mcp_name(name) for servers in blocks for name, spec in servers.items()
-            if isinstance(spec, dict) and (spec.get("type") in ("http", "sse") or spec.get("url"))}
-
-
-def outside(payload: dict, server: str) -> bool:
-    tool = payload.get("tool_name") or ""
-    if tool in ("WebSearch", "WebFetch"):
-        return True
-    if tool.startswith("mcp__"):
-        name = tool[len("mcp__"):].split("__", 1)[0]
-        if name == server or name.startswith(_ACCOUNT_PREFIXES):
-            return False
-        # A local server, or one of the agent app's own tools, is the user's own machine.
-        return name in remote_servers(payload.get("cwd"))
-    if tool == "Bash":
-        cmd = str((payload.get("tool_input") or {}).get("command") or "")
-        return any(_net_segment(s) for s in _SEGMENT.split(cmd))
-    return False
 
 
 def logged_in() -> bool:
@@ -98,167 +31,11 @@ def login_first(server: str) -> str:
     )
 
 
-def _args(argv: list[str]) -> tuple[str, bool]:
-    server, block = "hyperroute", False
-    i = 0
-    while i < len(argv):
-        if argv[i] == "--server" and i + 1 < len(argv):
-            server = argv[i + 1]
-            i += 1
-        elif argv[i] == "--block":
-            block = True
-        i += 1
-    if os.environ.get("HYPERROUTE_GUARD", "").lower() in ("remind", "off"):
-        block = False
-    return server, block
-
-
-ROUTE_TIMEOUT = 6.0
-NATIVE_TTL = 86400
-
-
-# Credentials never leave the machine in a guard check: the router needs what the call is for, not
-# the keys it carries (specs/11). Header values, user:password pairs, credential-named parameters and
-# key-shaped strings are replaced before the lookup is sent.
-_SECRET_RX = (
-    (re.compile(r"(?i)(-H|--header)\s+(['\"]?)([A-Za-z0-9-]+)\s*:\s*[^'\"\n]*\2"), r"\1 \2\3: …\2"),
-    (re.compile(r"(?i)(-u|--user|--oauth2-bearer)\s+\S+"), r"\1 …"),
-    (re.compile(r"(?i)\b(authorization|bearer|x-api-key|api-key)(\s*[:=]\s*|\s+)(?!…)[^\s'\"]+"), r"\1\2…"),
-    (re.compile(r"(?i)([?&;](?:[a-z0-9_.-]*(?:key|token|secret|password|passwd|pwd|sig|signature|auth|"
-                r"credential|session|access)[a-z0-9_.-]*))=[^&#\s'\"]*"), r"\1=…"),
-    (re.compile(r"(?i)\b([a-z0-9_]*(?:key|token|secret|password|passwd)[a-z0-9_]*)=(?!…)[^\s&'\"]+"), r"\1=…"),
-    (re.compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@"), r"\1…@"),
-    (re.compile(r"\b(?:sk|pk|rk|hyr|ghp|gho|ghs|xox[abp]|AKIA)[-_A-Za-z0-9]{12,}"), "…"),
-    (re.compile(r"\b[A-Za-z0-9+/_-]{40,}={0,2}"), "…"),
-)
-
-
-def scrub(text: str) -> str:
-    for rx, rep in _SECRET_RX:
-        text = rx.sub(rep, text)
-    return text
-
-
-def _lookup(payload: dict) -> str:
-    """The attempted call as a lookup the router can rank, credentials removed."""
-    tool = payload.get("tool_name") or ""
-    inp = payload.get("tool_input") or {}
-    if tool == "WebSearch":
-        return scrub(str(inp.get("query") or ""))
-    if tool == "WebFetch":
-        return scrub(f"{inp.get('prompt') or 'fetch'} {inp.get('url') or ''}".strip())
-    if tool == "Bash":
-        return scrub(str(inp.get("command") or ""))[:400]
-    return scrub(f"{tool} {json.dumps(inp, ensure_ascii=False)}")[:400]
-
-
-def _native_ids(base: str) -> list[str]:
-    """Claude Code's coordinator ids from the live catalog, cached a day: the hook runs per call."""
-    import time
-
-    import httpx
-    path = install.home() / "state" / "native_ids.json"
-    try:
-        c = json.loads(path.read_text())
-        if c.get("base") == base and time.time() - c.get("at", 0) < NATIVE_TTL:
-            return c["ids"]
-    except Exception:
-        pass
-    r = httpx.get(f"{base}/console", params={"view": "tools", "format": "json"}, timeout=3)
-    ids = sorted(t["id"] for t in (r.json().get("tools") or [])
-                 if t.get("kind") == "coordinator_agent" and str(t.get("id", "")).startswith("claude_code"))
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"base": base, "at": time.time(), "ids": ids}))
-    except Exception:
-        pass
-    return ids
-
-
-def _route(query: str) -> str | None:
-    """Rank the attempted call (the min text wire), or None when the router cannot answer."""
-    import httpx
-    base = config.base_url()
-    key = config.preset_api_key() or (tokenstore.load(base) or {}).get("api_key")
-    try:
-        ctx = {"native_tools": _native_ids(base)}
-        body = {"query": query, "detail": "min", "format": "text", "context": ctx}
-        if (ref := ledger.caller()):
-            body["caller"] = {"ref": ref}             # the profile the MCP already sent, by reference
-        r = httpx.post(f"{base}/recommend", timeout=ROUTE_TIMEOUT,
-                       headers={"authorization": f"Bearer {key}"} if key else {}, json=body)
-    except Exception:
-        ledger.note_outage()
-        return None
-    return r.text if r.is_success else None
-
-
-def _best(text: str) -> tuple[str, str]:
-    for line in text.splitlines():
-        if line.startswith("→ "):
-            cols = [c for c in re.split(r"\s{2,}", line[2:].strip()) if c]
-            return cols[0], (cols[-1] if len(cols) > 4 else "")
-    return "", ""
-
-
-def _needs_key(text: str) -> bool:
-    for line in text.splitlines():
-        if line.startswith("→ "):
-            return "needs_key" in re.split(r"\s{2,}", line[2:].strip())
-    return False
-
-
-def _log(tool: str, lookup: str, decision: str, best: str = "") -> None:
-    """One line per guard decision, for whoever audits a session: the agent never sees it."""
-    import time
-    try:
-        path = install.home() / "state" / "guard.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a") as f:
-            f.write(json.dumps({"at": time.time(), "tool": tool, "lookup": lookup[:400],
-                                "decision": decision, "best": best}, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-def _guard(event: str, server: str, block: bool, payload: dict) -> dict | None:
-    if not outside(payload, server):
-        return None
-    tool = payload.get("tool_name") or "this tool"
-    p = f"mcp__{server}__"
-    if not logged_in():
-        # Routing is impossible until login: never block, only say so.
-        return {"hookSpecificOutput": {"hookEventName": event,
-                                       "additionalContext": login_first(server)}}
-    if ledger.in_outage():
-        return None
-    # A "do it yourself" answer for THIS lookup lets exactly one call through.
-    if ledger.take_pass(json.dumps(payload.get("tool_input") or {}, ensure_ascii=False)):
-        _log(tool, _lookup(payload), "pass")
-        return None
-    if block:
-        # Rank this very call. The agent's own tool best → it goes through, silently.
-        lookup = _lookup(payload)
-        text = _route(lookup)
-        if text is None and ledger.in_outage():
-            _log(tool, lookup, "outage")
-            return None
-        if text is not None and ledger.handed_back(text):
-            _log(tool, lookup, "allow")
-            return None
-        best, why = _best(text or "")
-        if best and _needs_key(text or ""):
-            _log(tool, lookup, "allow_no_key", best)
-            return None
-        _log(tool, lookup, "deny", best)
-        better = f"{best} is better for this" + (f" ({why.rstrip('.')})" if why else "") if best else \
-            "this lookup needs a HyperRoute ranking"
-        return {"hookSpecificOutput": {
-            "hookEventName": event, "permissionDecision": "deny",
-            "permissionDecisionReason": f"{tool} stopped: {better}. Send it via {p}run."}}
-    return {"hookSpecificOutput": {
-        "hookEventName": event,
-        "additionalContext": f"{tool} used without HyperRoute; send the next outside lookup via {p}run."}}
+def _server(argv: list[str]) -> str:
+    for i, a in enumerate(argv[:-1]):
+        if a == "--server":
+            return argv[i + 1]
+    return "hyperroute"
 
 
 def _report_check(server: str) -> dict | None:
@@ -275,9 +52,7 @@ def output(name: str, argv: list[str], payload: dict | None = None) -> dict | No
     event = EVENTS.get(name)
     if not event:
         return None
-    server, block = _args(argv)
-    if name == "web-guard":
-        return _guard(event, server, block, payload or {})
+    server = _server(argv)
     if name == "report-check":
         return _report_check(server)
     text = rule(server) if logged_in() else login_first(server) + "\n\n" + rule(server)

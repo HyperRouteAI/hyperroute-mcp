@@ -116,10 +116,11 @@ def test_request_session_reads_the_request():
 def test_hosted_instructions_lead_with_run_and_drop_local_pieces():
     text = server.instructions(hosted=True)
     assert "Send each via `run`" in text[:512]          # ChatGPT reads only the first ~512 characters
-    for local in ("use_token", "`setup`", "Login:", "HyperRoute checks it first"):
+    for local in ("use_token", "`setup`", "Login:"):
         assert local not in text
     assert "declare_my_tool" in text and "prefer_tool" in text
-    assert "HyperRoute checks it first" in server.instructions()
+    from hyperroute_mcp import rules
+    assert text.startswith(rules.plain()) and server.instructions().startswith(rules.plain())
 
 
 def test_run_description_carries_the_routing_rule():

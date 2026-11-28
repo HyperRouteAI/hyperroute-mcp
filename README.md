@@ -14,11 +14,8 @@ In your coding agent, type:
 ! uvx -q hyperroute-mcp@latest install
 ```
 
-It adds HyperRoute to Claude Code with hooks: the routing rules at session and subagent start, a
-guard that blocks the agent's own outside calls (web search and fetch, network commands, other MCP
-servers) until HyperRoute has ranked the lookup, and an end-of-turn check for unreported runs.
-`install --remind-only` makes the guard remind instead of block; `install --remove` undoes the
-hooks. Needs [uv](https://docs.astral.sh/uv/).
+It adds HyperRoute to Claude Code with hooks: the routing rules at session and subagent start, and
+an end-of-turn check for unreported runs. `install --remove` undoes the hooks. Needs [uv](https://docs.astral.sh/uv/).
 
 **By hand.** Claude Code:
 
@@ -125,7 +122,6 @@ None are needed against the hosted router. For development and self-hosting:
 | `HYPERROUTE_COORDINATOR` | auto-detect | Coordinator override; `none` disables. |
 | `HYPERROUTE_NATIVE_TOOLS` | — | Exact coordinator tool ids. |
 | `HYPERROUTE_HELD` | — | Comma-separated plan groups you hold. |
-| `HYPERROUTE_GUARD` | block | `remind` makes the Claude Code guard remind instead of block. |
 | `HYPERROUTE_PUBLIC_URL` | `HYPERROUTE_BASE_URL` | `serve` only: the public origin the endpoint is reached at. |
 | `HYPERROUTE_MCP_RATE` / `HYPERROUTE_MCP_BURST` | `120` / `60` | `serve` only: calls per minute per account, and burst. |
 | `HYPERROUTE_LOG_LEVEL` | `info` | `serve` only: uvicorn log level. |
