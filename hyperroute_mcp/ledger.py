@@ -158,7 +158,8 @@ def clear_item(item: str) -> None:
 
 
 def pending(key: str | None = None) -> list[dict]:
-    return load(key)["pending"]
+    now = time.time()
+    return [r for r in load(key)["pending"] if now - r.get("at", now) < STALE_SECONDS]
 
 
 def describe(runs: list[dict]) -> str:
